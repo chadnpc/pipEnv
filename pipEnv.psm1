@@ -22,6 +22,7 @@ class InstallFailedException : InstallException {
 class Requirement {
   [string] $Name
   [version] $Version
+  [string] $Description
   [string] $InstallScript
 
   Requirement() {}
@@ -58,13 +59,13 @@ class Requirement {
   [bool] Resolve([switch]$Force, [switch]$What_If) {
     $is_resolved = $true
     if (!$this.IsInstalled() -or $Force.IsPresent) {
-      Write-Host "[Resolve requrement] $($this.Name) " -f Green -NoNewline
+      Write-Console "[Resolve requrement] $($this.Name) " -f Green -NoNewLine
       if ($this.Description) {
-        Write-Host "($($this.Description)) " -f BlueViolet -NoNewline
+        Write-Console "($($this.Description)) " -f BlueViolet -NoNewLine
       }
-      Write-Host "$($this.Version) " -f Green
+      Write-Console "$($this.Version) " -f Green
       if ($What_If.IsPresent) {
-        Write-Host "Would install: $($this.Name)" -f Yellow
+        Write-Console "Would install: $($this.Name)" -f Yellow
       } else {
         $this.InstallScript | Invoke-Expression -Force
       }
@@ -80,6 +81,9 @@ Class InstallRequirements {
   [string] $jsonPath = [IO.Path]::Combine($(Resolve-Path .).Path, 'requirements.json')
 
   InstallRequirements() {}
+  InstallRequirements([array]$list) {
+    $this.list = $list
+  }
   InstallRequirements([hashtable]$Map) {
     $Map.Keys | ForEach-Object { $Map[$_] ? ($this.$_ = $Map[$_]) : $null }
   }
@@ -126,10 +130,7 @@ class Venv {
     $this.Path = $dir.FullName;
     [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
     $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
-          $v = $true; $d = [IO.DirectoryInfo]::new($this.Path); ("bin", "lib").ForEach{
-            $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
-            if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
-          }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
+          $v = [Venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
           $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
           $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
@@ -166,6 +167,13 @@ class Venv {
     }
     return [venv]::new((Get-Item $venvPath -Force -EA Ignore))
   }
+  static [bool] IsValid([string]$dir) {
+    $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
+      $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
+      if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
+    }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
+    return $v
+  }
   [void] Activate() {
     $spath = Resolve-Path ([IO.Path]::Combine($this.Path, 'bin', 'Activate.ps1')) -ea Ignore
     if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("Venv activation script not found: $spath") }
@@ -173,18 +181,49 @@ class Venv {
   }
 }
 
-# https://github.com/pypa/pipEnv?tab=readme-ov-file#installation
+# [pipenv](https://github.com/pypa/pipEnv) wrapper
 
 class pipEnv {
+  static [InstallRequirements]$requirements = @(
+    ("pip", "The package installer for Python", {
+      switch ([pipEnv]::data.Os) {
+        'Windows' { py -m ensurepip --upgrade }
+        default { python -m ensurepip --upgrade }
+      }
+      pip install --user --upgrade pip }
+      ),
+      ("pipenv", "Python virtualenv management tool", {
+      pip install pipenv --user
+      $sitepackages = python -m site --user-site
+      $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
+      # add $sitepackages to $env:PATH
+      $env:PATH = "$env:PATH;$sitepackages" }
+    )
+  )
+  # session data
   static [PsRecord]$data = @{
     venv = [Venv]::new()
+    Os   = [xcrypt]::Get_Host_Os()
   }
   pipEnv() {}
+
+  static [void] Install() {
+    [pipEnv]::requirements.Resolve()
+    pipenv install
+  }
+  static [void] Install([string]$package) {
+    pipenv install $package
+  }
+  static [void] Upgrade() {
+    pip install --user --upgrade pipenv
+  }
 }
 
 #endregion Classes
 # Types that will be available to users when they import the module.
 $typestoExport = @(
+  [InstallRequirements],
+  [Requirement],
   [pipEnv],
   [Venv]
 )
