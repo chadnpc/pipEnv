@@ -1,5 +1,5 @@
 ﻿function Use-pipEnv {
-  [CmdletBinding()]
+  [CmdletBinding()][Alias('activate')]
   param (
     [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
     [Venv]$env
