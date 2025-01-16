@@ -145,18 +145,18 @@ class Venv {
     }
   }
   static [Venv] Create() {
-    return [Venv]::Create([IO.DirectoryInfo](Resolve-Path .).Path)
+    return [Venv]::Create([IO.DirectoryInfo]::new((Resolve-Path .).Path))
   }
-  static [Venv] Create([string]$rootPath) {
-    return [Venv]::Create([IO.DirectoryInfo](Resolve-Path $rootPath))
+  static [Venv] Create([string]$dir) {
+    return [Venv]::Create([IO.DirectoryInfo]::new((Resolve-Path $dir).Path))
   }
-  static [Venv] Create([IO.DirectoryInfo]$rootPath) {
-    return [Venv]::Create("env", $rootPath)
+  static [Venv] Create([IO.DirectoryInfo]$dir) {
+    return [Venv]::Create($dir.Name, $dir.Parent)
   }
-  static [Venv] Create([string]$Name, [IO.DirectoryInfo]$rootPath) {
-    $venvPath = [IO.Path]::Combine($rootPath.FullName, $Name)
+  static [Venv] Create([string]$Name, [IO.DirectoryInfo]$dir) {
+    $venvPath = [IO.Path]::Combine($dir.FullName, $Name)
     if (![IO.Directory]::Exists($venvPath)) { Write-Console "Create venv $Name" -f LimeGreen; python -m venv $Name }
-    $verfile = [IO.Path]::Combine($rootPath.FullName, ".python-version")
+    $verfile = [IO.Path]::Combine($dir.FullName, ".python-version")
     if ([IO.File]::Exists($verfile)) {
       $ver = Get-Content $verfile; $localver = pyenv local
       if ($localver -ne $ver) {
