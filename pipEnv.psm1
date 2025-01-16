@@ -117,10 +117,14 @@ Class InstallRequirements {
 #   python virtual environment helper class
 class Venv {
   [string]$Path
-  [PsRecord]$Config
+  [PsRecord]$Config = @{
+    defaultName = "env"
+  }
   hidden [string]$__name
-  hidden Venv([IO.DirectoryInfo]$dir) {
+  Venv() {}
+  Venv([IO.DirectoryInfo]$dir) {
     $this.Path = $dir.FullName;
+    [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
     $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = $true; $d = [IO.DirectoryInfo]::new($this.Path); ("bin", "lib").ForEach{
             $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
@@ -137,14 +141,17 @@ class Venv {
     if (![string]::IsNullOrWhiteSpace($this.Name) -and $this.IsValid) {
       $venvconfig = Read-Env -File ([IO.Path]::Combine($this.Path, 'pyvenv.cfg'));
       $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
-      $this.Config = $c;
+      $this.Config.Set($c)
     }
   }
   static [Venv] Create() {
     return [Venv]::Create([IO.DirectoryInfo](Resolve-Path .).Path)
   }
+  static [Venv] Create([string]$rootPath) {
+    return [Venv]::Create([IO.DirectoryInfo](Resolve-Path $rootPath))
+  }
   static [Venv] Create([IO.DirectoryInfo]$rootPath) {
-    return [Venv]::Create(".venv", $rootPath)
+    return [Venv]::Create("env", $rootPath)
   }
   static [Venv] Create([string]$Name, [IO.DirectoryInfo]$rootPath) {
     $venvPath = [IO.Path]::Combine($rootPath.FullName, $Name)
@@ -169,6 +176,10 @@ class Venv {
 # https://github.com/pypa/pipEnv?tab=readme-ov-file#installation
 
 class pipEnv {
+  static [PsRecord]$data = @{
+    venv = [Venv]::new()
+  }
+  pipEnv() {}
 }
 
 #endregion Classes
