@@ -1,17 +1,23 @@
 ﻿function Use-pipEnv {
-  [CmdletBinding()][Alias('activate')]
+  [CmdletBinding(DefaultParameterSetName = 'envdir')][Alias('activate')]
   param (
-    [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+    [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ParameterSetName = 'envdir')]
+    [validateScript({
+        if (Test-Path -Path $_ -PathType Container -ea Ignore) {
+          return $true
+        } else {
+          throw [System.ArgumentException]::new('envdir', "Path: $_ is not a valid directory.")
+        }
+      })][Alias('envdir')]
+    [string]$Path,
+
+    [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, parameterSetName = 'env')]
+    [ValidateNotNullOrEmpty()]
     [Venv]$env
   )
 
-  begin {
-  }
-
   process {
-  }
-
-  end {
-    $env.Activate()
+    $e = ($PSCmdlet.ParameterSetName -eq 'env') ? $env : ([Venv]::Create($Path))
+    if ($null -ne $e) { $e.Activate() }
   }
 }
