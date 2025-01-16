@@ -53,7 +53,7 @@ begin {
   $BuildOutDir = Resolve-Path $([IO.Path]::Combine($PSScriptRoot, 'BuildOutput', 'pipEnv', $version)) -ErrorAction Ignore | Get-Item -ErrorAction Ignore
   if (!$BuildOutDir.Exists) { throw [System.IO.DirectoryNotFoundException]::new($BuildOutDir) }
   $manifestFile = [IO.FileInfo]::New([IO.Path]::Combine($BuildOutDir.FullName, "pipEnv.psd1"))
-  Write-Host "[+] Checking Prerequisites ..." -ForegroundColor Green
+  Write-Console "[+] Checking Prerequisites ..." -f LimeGreen
   if (!$BuildOutDir.Exists) {
     $msg = 'Directory "{0}" Not Found. First make sure you successfuly built the module.' -f ([IO.Path]::GetRelativePath($PSScriptRoot, $BuildOutDir.FullName))
     if ($skipBuildOutputTest.IsPresent) {
@@ -74,10 +74,10 @@ begin {
 
 process {
   Get-Module PsCraft | Remove-Module -Force -Verbose:$false
-  Write-Host "[+] Checking test files ..." -ForegroundColor Green
+  Write-Console "[+] Checking test files ..." -f LimeGreen
   $missingTestFiles = $testFiles.Where({ !$_.Exists })
   if ($missingTestFiles.count -gt 0) { throw [System.IO.FileNotFoundException]::new($($testFiles.BaseName -join ', ')) }
-  Write-Host "[+] Testing ModuleManifest ..." -ForegroundColor Green
+  Write-Console "[+] Testing ModuleManifest ..." -f LimeGreen
   if (!$skipBuildOutputTest.IsPresent) {
     Test-ModuleManifest -Path $manifestFile.FullName -ErrorAction Stop -Verbose
   }
