@@ -101,7 +101,7 @@
       LicenseUri   = 'https://alain.mit-license.org/'
 
       # A URL to the main website for this project.
-      ProjectUri   = 'https://github.com/Alain%20Herve/pipEnv'
+      ProjectUri   = 'https://github.com/alainQtec/pipEnv'
 
       # A URL to an icon representing this module.
       IconUri      = 'https://github.com/user-attachments/assets/1220c30e-a309-43c3-9a80-1948dae30e09'
