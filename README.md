@@ -1,6 +1,9 @@
 ﻿# [pipEnv](https://www.powershellgallery.com/packages/pipEnv)
 
-🔥 Blazingly fast PowerShell thingy that stonks up your terminal game.
+Python project environment manager using
+[pipEnv](https://pipenv.pypa.io/en/latest/)
+
+this is basically a pipenv wrapper installer and utilities for PowerShell.
 
 ## Usage
 
