@@ -67,7 +67,7 @@ class Requirement {
       if ($What_If.IsPresent) {
         Write-Console "Would install: $($this.Name)" -f Yellow
       } else {
-        $this.InstallScript | Invoke-Expression -Force
+        [ScriptBlock]::Create("$($this.InstallScript)").Invoke()
       }
       $is_resolved = $?
     }
@@ -191,8 +191,14 @@ class pipEnv {
         default { python -m ensurepip --upgrade }
       }
       pip install --user --upgrade pip }
-      ),
-      ("pipenv", "Python virtualenv management tool", {
+    ),
+    ("pyenv", "Python version manager", {
+      switch ([pipEnv]::data.Os) {
+        'Windows' { Write-Warning "Pyenv does not officially support Windows and does not work in Windows outside the Windows Subsystem for Linux." }
+        default { curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash }
+      } }
+    ),
+    ("pipenv", "Python virtualenv management tool", {
       pip install pipenv --user
       $sitepackages = python -m site --user-site
       $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
@@ -208,10 +214,11 @@ class pipEnv {
   pipEnv() {}
 
   static [void] Install() {
-    [pipEnv]::requirements.Resolve()
+    $r = [pipEnv]::requirements; !$r.resolved ? $r.Resolve() : $null
     pipenv install
   }
   static [void] Install([string]$package) {
+    $r = [pipEnv]::requirements; !$r.resolved ? $r.Resolve() : $null
     pipenv install $package
   }
   static [void] Upgrade() {
