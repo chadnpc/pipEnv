@@ -3,7 +3,8 @@
   [OutputType([Venv])]
   param (
     [Parameter(Mandatory = $false, Position = 0)]
-    [string]$Name = 'venv'
+    [ValidateNotNullOrWhiteSpace()]
+    [string]$Name = [pipEnv]::data.venv.Config.defaultName
   )
 
   process {
