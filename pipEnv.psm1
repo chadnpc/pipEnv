@@ -1,5 +1,6 @@
 ﻿#!/usr/bin/env pwsh
 using namespace System.IO
+using namespace System.Collections.Generic
 using namespace System.Management.Automation
 
 #Requires -RunAsAdministrator
@@ -81,12 +82,10 @@ Class InstallRequirements {
   [string] $jsonPath = [IO.Path]::Combine($(Resolve-Path .).Path, 'requirements.json')
 
   InstallRequirements() {}
-  InstallRequirements([array]$list) {
-    $this.list = $list
-  }
-  InstallRequirements([hashtable]$Map) {
-    $Map.Keys | ForEach-Object { $Map[$_] ? ($this.$_ = $Map[$_]) : $null }
-  }
+  InstallRequirements([array]$list) { $this.list = $list }
+  InstallRequirements([List[array]]$list) { $this.list = $list.ToArray() }
+  InstallRequirements([hashtable]$Map) { $Map.Keys | ForEach-Object { $Map[$_] ? ($this.$_ = $Map[$_]) : $null } }
+
   [void] Resolve() {
     $this.Resolve($false, $false)
   }
@@ -179,50 +178,85 @@ class Venv {
     if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("Venv activation script not found: $spath") }
     &$spath
   }
+  [void] Delete() {
+    $this.Path | Remove-Item -Force -Recurse -Verbose:$false -ea Ignore
+  }
 }
 
+# .LINK
 # [pipenv](https://github.com/pypa/pipEnv) wrapper
-
 class pipEnv {
-  static [InstallRequirements]$requirements = @(
-    ("pip", "The package installer for Python", {
-      switch ([pipEnv]::data.Os) {
-        'Windows' { py -m ensurepip --upgrade }
-        default { python -m ensurepip --upgrade }
-      }
-      pip install --user --upgrade pip }
-    ),
-    ("pyenv", "Python version manager", {
-      switch ([pipEnv]::data.Os) {
-        'Windows' { Write-Warning "Pyenv does not officially support Windows and does not work in Windows outside the Windows Subsystem for Linux." }
-        default { curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash }
-      } }
-    ),
-    ("pipenv", "Python virtualenv management tool", {
-      pip install pipenv --user
-      $sitepackages = python -m site --user-site
-      $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
-      # add $sitepackages to $env:PATH
-      $env:PATH = "$env:PATH;$sitepackages" }
-    )
-  )
-  # session data
-  static [PsRecord]$data = @{
-    venv = [Venv]::new()
-    Os   = [xcrypt]::Get_Host_Os()
-  }
-  pipEnv() {}
+  [venv]$ProjectEnv
+  static [PsRecord]$data = [pipEnv].data #starts $null until any instance is created
+  static [InstallRequirements]$req
+  [string]$bin
+  pipEnv() { $this.__init__() }
+  static [pipEnv] Create() { return [pipEnv]::new() }
 
-  static [void] Install() {
-    $r = [pipEnv]::requirements; !$r.resolved ? $r.Resolve() : $null
-    pipenv install
+  [void] Install() {
+    & ($this.bin) install -q
   }
-  static [void] Install([string]$package) {
-    $r = [pipEnv]::requirements; !$r.resolved ? $r.Resolve() : $null
-    pipenv install $package
+  [void] Install([string]$package) {
+    & ($this.bin) install -q $package
   }
-  static [void] Upgrade() {
+  [void] Upgrade() {
     pip install --user --upgrade pipenv
+  }
+  [void] Remove() {
+    & ($this.bin) --rm
+  }
+  static [version[]] GetPythonVersions() {
+    return ((pyenv versions).Split("`n").Trim() | Select-Object @{l = "version"; e = { $l = $_; if ($l.StartsWith("*")) { $l = $l.Substring(1).TrimStart().Split(' ')[0] }; $m = $l -match [pipEnv].CONSTANTS.validversionregex; $m ? $l : "not-a-version" } } | Where-Object { $_.version -ne "not-a-version" }).version
+  }
+  hidden [void] __init__() {
+    # add default requirements here. each array contains ("packageName", "description", { Install_script })
+    [List[array]]$_req = @(
+      ("pip", "The package installer for Python", {
+        switch ([pipEnv]::data.Os) {
+          'Windows' { py -m ensurepip --upgrade }
+          default { python -m ensurepip --upgrade }
+        }
+        pip install --user --upgrade pip }
+      ),
+      ("pyenv", "Python version manager", {
+        switch ([pipEnv]::data.Os) {
+          'Windows' { Write-Warning "Pyenv does not officially support Windows and does not work in Windows outside the Windows Subsystem for Linux." }
+          default { curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash }
+        } }
+      ),
+      ("pipenv", "Python virtualenv management tool", {
+        pip install pipenv --user
+        $sitepackages = python -m site --user-site
+        $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
+        # add $sitepackages to $env:PATH
+        $env:PATH = "$env:PATH;$sitepackages" }
+      )
+    )
+    [pipEnv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
+            # Add your constant primitives here:
+            validversionregex = '^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$'
+          }").InvokeReturnAsIs()
+        }, { throw [SetValueException]::new("CONSTANTS is read-only") }
+      )
+    )
+    $1st_run = $null -eq [pipEnv]::data
+    if ($1st_run) {
+      [pipEnv]::req = $_req; $r = [pipEnv]::req; !$r.resolved ? $r.Resolve() : $null
+      [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('data', [PsRecord]::new()))
+      [pipEnv].data.set(@{
+          SelectedVersion = [version]$(python --version).Split(" ").Where({ $_ -match [pipEnv].CONSTANTS.validversionregex })[0]
+          Instance        = $([ref]$this).Value
+          Os              = [xcrypt]::Get_Host_Os()
+        }
+      )
+    }
+    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [pipEnv]::GetPythonVersions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
+    $this.bin = (Get-Command pipenv -Type Application).Source
+    [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('bin', $([ref]$this.bin).Value))
+    $this.ProjectEnv = [Venv]::Create()
+    if ($1st_run) {
+      [pipEnv]::data = ([ref][pipEnv].data).Value
+    }
   }
 }
 
