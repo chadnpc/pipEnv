@@ -18,6 +18,13 @@ Import-Module pipEnv
 # do stuff here.
 ```
 
+## FAQs
+
+- Why make this wrapper? Why not use pipenv directly?
+
+  -> Some commands do not work as expected,ex: The command `pipenv shell` does
+  not always work in Powershell. so a wrapper makes sure it works.
+
 ## License
 
 This project is licensed under the [WTFPL License](LICENSE).
