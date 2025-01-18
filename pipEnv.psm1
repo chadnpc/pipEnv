@@ -9,9 +9,19 @@ using namespace System.Management.Automation
 
 #region    Classes
 enum EnvState {
-  active
-  inactive
+  Inactive
+  Active
 }
+
+enum PackageManager {
+  pip
+  poetry
+}
+class DependencyInfo {
+  [string]$Name
+  [string]$Version
+}
+
 class InstallException : Exception {
   InstallException() {}
   InstallException([string]$message) : base($message) {}
@@ -470,52 +480,45 @@ class pipEnv : EnvManager {
 #   python virtual environment implementation
 class venv {
   [string]$Path
+  [EnvState]$State
+  [string]$CreatedAt
+  [string]$LastActivated
+  [version]$PythonVersion
+  [PackageManager]$PackageManager
+  [Dictionary[string, DependencyInfo]]$dependencies
   static [PsRecord]$Config = @{
-    Name        = "env"
-    ProjectPath = (Resolve-Path .).Path
+    DefaultName      = "env"
+    ProjectPath      = (Resolve-Path .).Path
+    SharePipcache    = $False
+    RequirementsFile = "requirements.txt"
   }
-  static [EnvManager]$manager = [venv]::GetEnvManager("pipEnv")
+  static hidden [EnvManager]$manager = [venv]::GetEnvManager("pipEnv")
   hidden [string]$__name
   venv() {}
+  venv([string]$Path) {
+    [void][venv]::From([IO.DirectoryInfo]::new($Path), [ref]$this)
+  }
   venv([IO.DirectoryInfo]$dir) {
-    $this.Path = $dir.FullName; #the exact path for the venv
-    [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
-    $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
-          $v = [venv]::IsValid($this.Path)
-          $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
-          return ($v ? $this.__name : [string]::Empty);
-        }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
-      )
-    )
-    $this.Name = $dir.Name;
-    if (![string]::IsNullOrWhiteSpace($this.Name) -and $this.IsValid) {
-      $venvconfig = Read-Env -File ([IO.Path]::Combine($this.Path, 'pyvenv.cfg'));
-      $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
-      [venv]::Config.Set($c)
-    }
+    [void][venv]::From($dir, [ref]$this)
   }
   static [venv] Create() {
     return [venv]::Create([IO.DirectoryInfo]::new([venv]::Config.ProjectPath))
   }
   static [venv] Create([string]$dir) {
     [ValidateNotNullOrWhiteSpace()][string]$dir = $dir
-    return [venv]::Create([IO.DirectoryInfo]::new($dir))
-  }
-  static [venv] Create([IO.DirectoryInfo]$dir) {
-    return [venv]::Create([venv]::Config.Name, $dir)
+    return [venv]::Create([venv]::Config.DefaultName, [IO.DirectoryInfo]::new($dir))
   }
   static [venv] Create([string]$envname, [IO.DirectoryInfo]$dir) {
-    # !$dir.FullName can be ProjectPath or the exact path for the venv
+    # .NOTES
+    # $dir.FullName can be ProjectPath or the exact path for the venv
     # so we first check if the venv was already created:
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     if ([venv]::IsValid($dir.FullName)) {
-      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "a virtual environment for '$($dir.BaseName)' already exists!" -f Azure
+      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console " found virtual environment for '$($dir.BaseName)'" -f Azure
       return [venv]::new($dir)
     }
     $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
-    $_env_paths = $_env_paths ? $_env_paths : $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
+    $_env_paths = ($null -ne $_env_paths) ? $_env_paths : $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
     if ($null -eq $_env_paths) {
       Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "creating env for project: $($dir.BaseName)" -f LimeGreen;
       [venv]::Run("install", "check")
@@ -533,6 +536,29 @@ class venv {
       $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
       return $reslt
     }
+  }
+  static hidden [venv] From([IO.DirectoryInfo]$dir) {
+    return [venv]::From($dir, [ref]([venv]::new()))
+  }
+  static hidden [venv] From([IO.DirectoryInfo]$dir, [ref]$o) {
+    $o.Value.Path = $dir.FullName; #the exact path for the venv
+    [IO.Directory]::Exists($o.Value.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
+    $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
+          $v = [venv]::IsValid($this.Path)
+          $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
+          return ($v ? $this.__name : [string]::Empty);
+        }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
+      )
+    )
+    $o.Value.Name = $dir.Name;
+    if (![string]::IsNullOrWhiteSpace($o.Value.Name) -and $o.Value.IsValid) {
+      $venvconfig = Read-Env -File ([IO.Path]::Combine($o.Value.Path, 'pyvenv.cfg'));
+      $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
+      [venv]::Config.Set($c)
+    }
+    return $o.Value
   }
   [Object[]] verify() { return [venv]::Run("verify") }
   [Object[]] upgrade() { return [venv]::Run("upgrade") }
@@ -554,10 +580,10 @@ class venv {
     }
     return $m
   }
-  static hidden [string] GetActivationScript() {
+  static [string] GetActivationScript() {
     return [venv]::GetActivationScript((Resolve-Path .).Path)
   }
-  static hidden [string] GetActivationScript([string]$ProjectPath) {
+  static [string] GetActivationScript([string]$ProjectPath) {
     $e = [venv]::Create($ProjectPath)
     return ([venv]::IsValid($e.Path) ? ([IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')) : '')
   }
