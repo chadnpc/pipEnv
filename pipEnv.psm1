@@ -485,7 +485,6 @@ class venv {
   [PackageManager]$PackageManager
   [Dictionary[string, DependencyInfo]]$dependencies
   static [PsRecord]$Config = @{
-    DefaultName      = "env"
     ProjectPath      = (Resolve-Path .).Path
     SharePipcache    = $False
     RequirementsFile = "requirements.txt"
@@ -493,8 +492,8 @@ class venv {
   static hidden [EnvManager]$manager = [venv]::GetEnvManager("pipEnv")
   hidden [string]$__name
   venv() {}
-  venv([string]$Path) {
-    [void][venv]::From([IO.DirectoryInfo]::new($Path), [ref]$this)
+  venv([string]$dir) {
+    [void][venv]::From([IO.DirectoryInfo]::new($dir), [ref]$this)
   }
   venv([IO.DirectoryInfo]$dir) {
     [void][venv]::From($dir, [ref]$this)
@@ -504,9 +503,9 @@ class venv {
   }
   static [venv] Create([string]$dir) {
     [ValidateNotNullOrWhiteSpace()][string]$dir = $dir
-    return [venv]::Create([venv]::Config.DefaultName, [IO.DirectoryInfo]::new($dir))
+    return [venv]::Create([IO.DirectoryInfo]::new($dir))
   }
-  static [venv] Create([string]$envname, [IO.DirectoryInfo]$dir) {
+  static [venv] Create([IO.DirectoryInfo]$dir) {
     # .NOTES
     # $dir.FullName can be ProjectPath or the exact path for the venv
     # Option1: check if the venv was already created:
@@ -518,8 +517,8 @@ class venv {
     $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
     if ($null -ne $_env_paths) {
       Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "Found existing env for project: $($dir.BaseName)" -f LimeGreen;
-      $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
-      $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
+      $reslt = [venv]::GetEnvPath($dir.FullName)
+      $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt)
       return $reslt
     }
     # Option2: check in the current directory
@@ -543,14 +542,15 @@ class venv {
         Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
       }
     }
-    return [venv]::new([Path]::Combine($dir.FullName, $envname))
+    $p = [venv]::GetEnvPath($dir.FullName);
+    $p = [Directory]::Exists($p) ? $p : ([Path]::Combine($dir.FullName, "env"))
+    return [venv]::new($p)
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir) {
     return [venv]::From($dir, [ref]([venv]::new()))
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir, [ref]$o) {
-    $o.Value.Path = $dir.FullName; #the exact path for the venv
-    [IO.Directory]::Exists($o.Value.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
+    [IO.Directory]::Exists($dir.FullName) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
@@ -562,20 +562,15 @@ class venv {
     )
     $o.Value.Name = $dir.Name;
     if (![string]::IsNullOrWhiteSpace($o.Value.Name) -and $o.Value.IsValid) {
-      $venvconfig = Read-Env -File ([IO.Path]::Combine($o.Value.Path, 'pyvenv.cfg'));
+      $venvconfig = Read-Env -File ([IO.Path]::Combine($dir.FullName, 'pyvenv.cfg'));
       $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
       [venv]::Config.Set($c)
     }
+    $o.Value.Path = $dir.FullName; #the exact path for the venv
     $o.Value.CreatedAt = [IO.Directory]::GetCreationTime($dir.FullName);
     $o.Value.PythonVersion = [pipEnv].data.SelectedVersion;
     return $o.Value
   }
-  [Object[]] verify() { return [venv]::Run("verify") }
-  [Object[]] upgrade() { return [venv]::Run("upgrade") }
-  [Object[]] sync() { return [venv]::Run("sync") }
-  [Object[]] lock() { return [venv]::Run("lock") }
-  [Object[]] install() { return [venv]::Run("install") }
-
   static [Object[]] Run([string[]]$commands) {
     return [venv]::manager.Run($commands)
   }
@@ -597,6 +592,17 @@ class venv {
     $e = [venv]::Create($ProjectPath)
     return ([venv]::IsValid($e.Path) ? ([IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')) : '')
   }
+  static [string] GetEnvPath() {
+    return [venv]::GetEnvPath([venv]::Config.ProjectPath)
+  }
+  static [string] GetEnvPath([string]$ProjectPath) {
+    $reslt = $null; $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
+    if ($null -ne $_env_paths) {
+      $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
+      $reslt = ($reslt.count -eq 0) ? $null : $reslt[0]
+    }
+    return $reslt
+  }
   static [bool] IsValid([string]$dir) {
     $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
       $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
@@ -604,6 +610,11 @@ class venv {
     }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
     return $v
   }
+  [Object[]] verify() { return [venv]::Run("verify") }
+  [Object[]] upgrade() { return [venv]::Run("upgrade") }
+  [Object[]] sync() { return [venv]::Run("sync") }
+  [Object[]] lock() { return [venv]::Run("lock") }
+  [Object[]] install() { return [venv]::Run("install") }
   [void] Activate() {
     $spath = Resolve-Path ([IO.Path]::Combine($this.Path, 'bin', 'activate.ps1')) -ea Ignore
     if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("env activation script not found: $spath") }
