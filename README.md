@@ -24,15 +24,17 @@ then
 
 ```PowerShell
 Import-Module pipEnv
+$e = New-pipEnv .
+$e.Activate()
 # do stuff:
-New-pipEnv .
+deactivate
 ```
 
 hint: run `deactivate` to return
 
 ## status
 
-- [x] wrapper. 40% complete
+- [x] wrapper. 60% complete
 
 - [x] utilities
 
