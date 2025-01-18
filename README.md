@@ -15,15 +15,32 @@ then
 
 ```PowerShell
 Import-Module pipEnv
-# do stuff here.
+# do stuff:
+[venv]::Run("check")
+[venv]::Run("shell")
 ```
+
+hint: run `deactivate` to return
 
 ## FAQs
 
 - Why make this wrapper? Why not use pipenv directly?
 
-  -> Some commands do not work as expected,ex: The command `pipenv shell` does
-  not always work in Powershell. so a wrapper makes sure it works.
+  ==> commands not work as expected => I got frustated => I build thing to
+  patch.
+
+  Example: The command `pipenv shell` does not always work in Powershell. but
+  this wrapper deals with that, not me.
+
+## Status
+
+- [x] wrapper. 40% complete
+
+- [x] utilities
+
+- [ ] tests
+
+- [![GitHub Release Date](https://img.shields.io/github/release/alainQtec/pipEnv.svg)](https://github.com/alainQtec/pipEnv/releases)
 
 ## License
 
