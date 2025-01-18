@@ -555,20 +555,20 @@ class venv {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
           $this.PsObject.Properties.Add([Psscriptproperty]::new('State', [scriptblock]::Create("return [EnvState][int]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("State is read-only") }));
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [IO.Path]::Exists(`$this.Path) -and [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
           return ($v ? $this.__name : [string]::Empty);
         }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
       )
     )
     $o.Value.Name = $dir.Name;
+    $o.Value.Path = $dir.FullName; #the exact path for the venv
+    $o.Value.CreatedAt = [Datetime]::Now.ToString();
+    $o.Value.PythonVersion = [pipEnv].data.SelectedVersion;
     if (![string]::IsNullOrWhiteSpace($o.Value.Name) -and $o.Value.IsValid) {
       $venvconfig = Read-Env -File ([IO.Path]::Combine($dir.FullName, 'pyvenv.cfg'));
       $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
       [venv]::Config.Set($c)
     }
-    $o.Value.Path = $dir.FullName; #the exact path for the venv
-    $o.Value.CreatedAt = [IO.Directory]::GetCreationTime($dir.FullName);
-    $o.Value.PythonVersion = [pipEnv].data.SelectedVersion;
     return $o.Value
   }
   static [Object[]] Run([string[]]$commands) {
