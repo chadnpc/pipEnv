@@ -530,8 +530,7 @@ class venv {
         }
       }
     }
-    ($null -ne $reslt) ? (return $reslt) : $(Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "Creating env for project: $($dir.BaseName)" -f LimeGreen)
-    [venv]::Run(("install", "check"))
+    ($null -ne $reslt) ? (return $reslt) : $([progressUtil]::WaitJob("[pipEnv] Creating env for project: $($dir.BaseName)", { [venv]::Run(("install", "check")) }))
     $verfile = [Path]::Combine($dir.FullName, ".python-version")
     if ([IO.File]::Exists($verfile)) {
       $ver = Get-Content $verfile; $localver = pyenv local
