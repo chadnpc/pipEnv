@@ -480,9 +480,7 @@ class pipEnv : EnvManager {
 #   python virtual environment implementation
 class venv {
   [string]$Path
-  [EnvState]$State
   [string]$CreatedAt
-  [string]$LastActivated
   [version]$PythonVersion
   [PackageManager]$PackageManager
   [Dictionary[string, DependencyInfo]]$dependencies
@@ -511,31 +509,41 @@ class venv {
   static [venv] Create([string]$envname, [IO.DirectoryInfo]$dir) {
     # .NOTES
     # $dir.FullName can be ProjectPath or the exact path for the venv
-    # so we first check if the venv was already created:
+    # Option1: check if the venv was already created:
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     if ([venv]::IsValid($dir.FullName)) {
       Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console " found virtual environment for '$($dir.BaseName)'" -f Azure
       return [venv]::new($dir)
     }
     $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
-    $_env_paths = ($null -ne $_env_paths) ? $_env_paths : $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
-    if ($null -eq $_env_paths) {
-      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "creating env for project: $($dir.BaseName)" -f LimeGreen;
-      [venv]::Run("install", "check")
-      $verfile = [Path]::Combine($dir.FullName, ".python-version")
-      if ([IO.File]::Exists($verfile)) {
-        $ver = Get-Content $verfile; $localver = pyenv local
-        if ($localver -ne $ver) {
-          $sc = [scriptblock]::Create("pyenv install $ver")
-          Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
-        }
-      }
-      return [venv]::new([DirectoryInfo][Path]::Combine($dir.FullName, $envname))
-    } else {
+    if ($null -ne $_env_paths) {
+      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "Found existing env for project: $($dir.BaseName)" -f LimeGreen;
       $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
       $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
       return $reslt
     }
+    # Option2: check in the current directory
+    $reslt = $null; $_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
+    if ($null -ne $_env_paths) {
+      $reslt = switch ($_env_paths.count) {
+        0 { $null; break }
+        1 { [venv]::new($_env_paths[0].FullName); break }
+        Default {
+          throw [InvalidOperationException]::new("Multiple environments found for project: $($dir.BaseName)")
+        }
+      }
+    }
+    ($null -ne $reslt) ? (return $reslt) : $(Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "Creating env for project: $($dir.BaseName)" -f LimeGreen)
+    [venv]::Run(("install", "check"))
+    $verfile = [Path]::Combine($dir.FullName, ".python-version")
+    if ([IO.File]::Exists($verfile)) {
+      $ver = Get-Content $verfile; $localver = pyenv local
+      if ($localver -ne $ver) {
+        $sc = [scriptblock]::Create("pyenv install $ver")
+        Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
+      }
+    }
+    return [venv]::new([Path]::Combine($dir.FullName, $envname))
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir) {
     return [venv]::From($dir, [ref]([venv]::new()))
@@ -546,8 +554,8 @@ class venv {
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('State', [scriptblock]::Create("return [EnvState][int]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("State is read-only") }));
           $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
           return ($v ? $this.__name : [string]::Empty);
         }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
       )
@@ -558,6 +566,8 @@ class venv {
       $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
       [venv]::Config.Set($c)
     }
+    $o.Value.CreatedAt = [IO.Directory]::GetCreationTime($dir.FullName);
+    $o.Value.PythonVersion = [pipEnv].data.SelectedVersion;
     return $o.Value
   }
   [Object[]] verify() { return [venv]::Run("verify") }
@@ -608,7 +618,9 @@ class venv {
 # Types that will be available to users when they import the module.
 $typestoExport = @(
   [InstallRequirements],
+  [DependencyInfo],
   [Requirement],
+  [EnvState],
   [pipEnv],
   [venv]
 )
