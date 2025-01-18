@@ -7,8 +7,8 @@
   #   New-pipEnv .
   #   Create a new virtual environment in the current directory
   # .EXAMPLE
-  #   New-pipEnv ~/path/to/project
-  #   Create a new virtual environment in the ~/path/to/project directory
+  #   New-PipEnv | Activate-Env
+  #   same as (New-PipEnv).Activate()
   [CmdletBinding(supportsShouldProcess = $true)]
   [OutputType([Venv])]
   param (
@@ -23,9 +23,6 @@
   }
   process {
     if ($PSCmdlet.ShouldProcess("Create virtual environment for $Name", $Path)) {
-      Push-Location $Path
-      [void][venv]::Run(("install", "check"))
-      Pop-Location
       $v = [Venv]::Create($Path)
     }
   }
