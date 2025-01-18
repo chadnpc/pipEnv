@@ -133,8 +133,17 @@ class EnvManager {
     $this.BinPath = $Path
     $this.LoadEnvironments()
   }
-  [Object[]] Run([string]$command) {
-    return $(& ($this.BinPath) $command)
+  [Object[]] Run([string[]]$commands) {
+    $res = @()
+    foreach ($c in $commands) {
+      $n = [venv]::manager.BinPath | Split-Path -Leaf
+      if ($n -eq "pipenv" -and $c -eq "shell") {
+        $e = [venv]::Create([venv]::Config.ProjectPath); $s = [IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')
+        $(![string]::IsNullOrWhiteSpace($e) -and ![string]::IsNullOrWhiteSpace($s)) ? $( return &$s ) : $( throw "Failed to get activation script")
+      }
+      $res += & ($this.BinPath) $commands
+    }
+    return $res
   }
   [bool] CreateEnvironment([string]$Name, [string]$Path) {
     try {
@@ -370,7 +379,7 @@ class EnvManager {
 # .SYNOPSIS
 #   Python virtual environment manager
 class pipEnv : EnvManager {
-  static [venv] $env # [pipEnv]::get_env((Resolve-Path .).Path)
+  static [venv] $env # [venv]::Create((Resolve-Path .).Path)
   static [PsRecord]$data = [pipEnv].data #starts $null until any instance is created
   pipEnv() { $this.__init__() }
   static [pipEnv] Create() { return [pipEnv]::new() }
@@ -429,32 +438,6 @@ class pipEnv : EnvManager {
     }
     return $exp
   }
-  static hidden [string] get_activation_script() {
-    return [pipEnv]::get_activation_script((Resolve-Path .).Path)
-  }
-  static hidden [string] get_activation_script([string]$ProjectPath) {
-    # FIXME: not a reliable way to get the activation script.
-    $e = [pipEnv]::get_env($ProjectPath)
-    return ($e ? ([IO.Path]::Combine($e, 'bin', 'activate.ps1')) : '')
-  }
-  static [venv] get_env([string]$ProjectPath) {
-    [ValidateNotNullOrWhiteSpace()][string]$ProjectPath = $ProjectPath
-    if (![IO.Directory]::Exists($ProjectPath)) {
-      throw [Argumentexception]::new(
-        "Please provide a valid project path!",
-        [DirectoryNotFoundException]::new("Directory not found: $ProjectPath")
-      )
-    }
-    $reslt = $null
-    $_envs = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
-    if ($_envs) {
-      $reslt = $_envs.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
-      $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
-    } else {
-      Write-Warning "[pipEnv] no virtual environments created yet."
-    }
-    return $reslt
-  }
   static hidden [List[array]] get_default_requirements() {
     # Add default requirements here. each array contains ("packageName", "description", { Install_script })
     return @(
@@ -495,7 +478,7 @@ class venv {
   hidden [string]$__name
   venv() {}
   venv([IO.DirectoryInfo]$dir) {
-    $this.Path = $dir.FullName;
+    $this.Path = $dir.FullName; #the exact path for the venv
     [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
     $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
@@ -517,23 +500,39 @@ class venv {
     return [venv]::Create([IO.DirectoryInfo]::new([venv]::Config.ProjectPath))
   }
   static [venv] Create([string]$dir) {
-    return [venv]::Create([IO.DirectoryInfo]::new([venv]::Config.ProjectPath))
+    [ValidateNotNullOrWhiteSpace()][string]$dir = $dir
+    return [venv]::Create([IO.DirectoryInfo]::new($dir))
   }
   static [venv] Create([IO.DirectoryInfo]$dir) {
-    return [venv]::Create($dir.Name, $dir.Parent)
+    return [venv]::Create([venv]::Config.Name, $dir)
   }
-  static [venv] Create([string]$Name, [IO.DirectoryInfo]$dir) {
-    $venvPath = [IO.Path]::Combine($dir.FullName, $Name)
-    if (![IO.Directory]::Exists($venvPath)) { Write-Console "Create venv $Name" -f LimeGreen; python -m venv $Name }
-    $verfile = [IO.Path]::Combine($dir.FullName, ".python-version")
-    if ([IO.File]::Exists($verfile)) {
-      $ver = Get-Content $verfile; $localver = pyenv local
-      if ($localver -ne $ver) {
-        $sc = [scriptblock]::Create("pyenv install $ver")
-        Write-Console "[Python version $ver] " -f LimeGreen -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
-      }
+  static [venv] Create([string]$envname, [IO.DirectoryInfo]$dir) {
+    # !$dir.FullName can be ProjectPath or the exact path for the venv
+    # so we first check if the venv was already created:
+    if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
+    if ([venv]::IsValid($dir.FullName)) {
+      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "a virtual environment for '$($dir.BaseName)' already exists!" -f Azure
+      return [venv]::new($dir)
     }
-    return [venv]::new((Get-Item $venvPath -Force -EA Ignore))
+    $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
+    $_env_paths = $_env_paths ? $_env_paths : $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
+    if ($null -eq $_env_paths) {
+      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "creating env for project: $($dir.BaseName)" -f LimeGreen;
+      [venv]::Run("install", "check")
+      $verfile = [Path]::Combine($dir.FullName, ".python-version")
+      if ([IO.File]::Exists($verfile)) {
+        $ver = Get-Content $verfile; $localver = pyenv local
+        if ($localver -ne $ver) {
+          $sc = [scriptblock]::Create("pyenv install $ver")
+          Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
+        }
+      }
+      return [venv]::new([DirectoryInfo][Path]::Combine($dir.FullName, $envname))
+    } else {
+      $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
+      $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
+      return $reslt
+    }
   }
   [Object[]] verify() { return [venv]::Run("verify") }
   [Object[]] upgrade() { return [venv]::Run("upgrade") }
@@ -541,13 +540,8 @@ class venv {
   [Object[]] lock() { return [venv]::Run("lock") }
   [Object[]] install() { return [venv]::Run("install") }
 
-  static [Object[]] Run([string]$command) {
-    $n = [venv]::manager.BinPath | Split-Path -Leaf
-    if ($n -eq "pipenv" -and $command -eq "shell") {
-      $e = [pipEnv]::get_env([venv]::Config.ProjectPath); $s = [IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')
-      (![string]::IsNullOrWhiteSpace($e) -and ![string]::IsNullOrWhiteSpace($s)) ? $( return &$s ) : $( throw "Failed to get activation script")
-    }
-    return [venv]::manager.Run($command)
+  static [Object[]] Run([string[]]$commands) {
+    return [venv]::manager.Run($commands)
   }
   static [EnvManager] GetEnvManager([string]$name) {
     $m = switch ($name) {
@@ -560,6 +554,13 @@ class venv {
     }
     return $m
   }
+  static hidden [string] GetActivationScript() {
+    return [venv]::GetActivationScript((Resolve-Path .).Path)
+  }
+  static hidden [string] GetActivationScript([string]$ProjectPath) {
+    $e = [venv]::Create($ProjectPath)
+    return ([venv]::IsValid($e.Path) ? ([IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')) : '')
+  }
   static [bool] IsValid([string]$dir) {
     $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
       $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
@@ -567,14 +568,10 @@ class venv {
     }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
     return $v
   }
-  [void] activate() {
+  [void] Activate() {
     $spath = Resolve-Path ([IO.Path]::Combine($this.Path, 'bin', 'activate.ps1')) -ea Ignore
     if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("env activation script not found: $spath") }
     &$spath
-  }
-  static [void] Clean () {
-    # Uninstalls all packages not specified in Pipfile.lock
-    pipenv clean
   }
   [void] Delete() {
     $this.Path | Remove-Item -Force -Recurse -Verbose:$false -ea Ignore
