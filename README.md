@@ -1,11 +1,20 @@
 ﻿# [pipEnv](https://www.powershellgallery.com/packages/pipEnv)
 
-Python project environment manager using
-[pipEnv](https://pipenv.pypa.io/en/latest/)
+Python project environment manager
 
-this is basically a pipenv wrapper installer and utilities for PowerShell.
+Uses: [pipenv.pypa.io](https://pipenv.pypa.io/en/latest/)
 
-## Usage
+Note: This is an unofficial pipenv wrapper (installer, runner and utilities) for
+PowerShell.
+
+> Why not use pipenv directly?
+
+**tldr**: Command not work => I get frustated => I build patch thing.
+
+**ex**: The command `pipenv shell` does not always work in Powershell. But this
+wrapper was created to deal with that, not manually by me everytime.
+
+## usage
 
 ```PowerShell
 Install-Module pipEnv
@@ -21,17 +30,7 @@ New-pipEnv .
 
 hint: run `deactivate` to return
 
-## FAQs
-
-- Why make this wrapper? Why not use pipenv directly?
-
-  ==> commands not work as expected => I got frustated => I build thing to
-  patch.
-
-  Example: The command `pipenv shell` does not always work in Powershell. but
-  this wrapper deals with that, not me.
-
-## Status
+## status
 
 - [x] wrapper. 40% complete
 
@@ -41,6 +40,23 @@ hint: run `deactivate` to return
 
 - [![GitHub Release Date](https://img.shields.io/github/release/alainQtec/pipEnv.svg)](https://github.com/alainQtec/pipEnv/releases)
 
-## License
+## contributing
+
+Pull requests are welcome.
+
+```PowerShell
+git clone https://github.com/alainQtec/pipEnv
+cd pipEnv
+git remote add upstream https://github.com/yourUserName/pipEnv.git
+git fetch upstream
+# make your changes... then
+# Run build.ps1 -Task Test
+# If everything passes:
+git add .
+git commit -m 'made cool changes to abc 😊'
+git push origin main
+```
+
+## license
 
 This project is licensed under the [WTFPL License](LICENSE).
