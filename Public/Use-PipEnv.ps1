@@ -8,7 +8,7 @@
         } else {
           throw [System.ArgumentException]::new('envdir', "Path: $_ is not a valid directory.")
         }
-      })][Alias('envdir')]
+      })]
     [string]$Path,
 
     [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, parameterSetName = 'env')]
