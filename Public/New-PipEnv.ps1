@@ -20,7 +20,7 @@
   process {
     if ($PSCmdlet.ShouldProcess("Create virtual environment for $Name", $Path)) {
       Push-Location $Path
-      [void][venv]::Run("install", "check")
+      [void][venv]::Run(("install", "check"))
       Pop-Location
       $v = [Venv]::Create($Path)
     }
