@@ -16,8 +16,7 @@ then
 ```PowerShell
 Import-Module pipEnv
 # do stuff:
-[venv]::Run("check")
-[venv]::Run("shell")
+New-pipEnv .
 ```
 
 hint: run `deactivate` to return
