@@ -511,12 +511,10 @@ class venv {
     # Option1: check if the venv was already created:
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     if ([venv]::IsValid($dir.FullName)) {
-      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console " found virtual environment for '$($dir.BaseName)'" -f Azure
       return [venv]::new($dir)
     }
     $_env_paths = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
     if ($null -ne $_env_paths) {
-      Write-Console "[pipEnv] " -f SlateBlue -NoNewLine ; Write-Console "Found existing env for project: $($dir.BaseName)" -f LimeGreen;
       $reslt = [venv]::GetEnvPath($dir.FullName)
       $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt)
       return $reslt
