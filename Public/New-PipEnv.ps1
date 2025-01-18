@@ -4,7 +4,11 @@
   # .LINK
   #   https://github.com/alainQtec/pipEnv/blob/main/Public/New-PipEnv.ps1
   # .EXAMPLE
-  #   New-pipEnv
+  #   New-pipEnv .
+  #   Create a new virtual environment in the current directory
+  # .EXAMPLE
+  #   New-pipEnv ~/path/to/project
+  #   Create a new virtual environment in the ~/path/to/project directory
   [CmdletBinding(supportsShouldProcess = $true)]
   [OutputType([Venv])]
   param (
