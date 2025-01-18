@@ -8,6 +8,10 @@ using namespace System.Management.Automation
 #Requires -Psedition Core
 
 #region    Classes
+enum EnvState {
+  active
+  inactive
+}
 class InstallException : Exception {
   InstallException() {}
   InstallException([string]$message) : base($message) {}
@@ -116,101 +120,344 @@ Class InstallRequirements {
   }
 }
 
-# .SYNOPSIS
-#   python virtual environment helper class
-class Venv {
-  [string]$Path
-  [PsRecord]$Config = @{
-    defaultName = "env"
+class EnvManager {
+  [validateNotNullOrEmpty()][string]$BinPath
+  [string]$CurrentEnvironment
+  [Dictionary[string, string]]$Environments = @{}
+  static [validateNotNullOrEmpty()][InstallRequirements]$req
+
+  EnvManager() {
+    $this.LoadEnvironments()
   }
-  hidden [string]$__name
-  Venv() {}
-  Venv([IO.DirectoryInfo]$dir) {
-    $this.Path = $dir.FullName;
-    [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
-    $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
-          $v = [Venv]::IsValid($this.Path)
-          $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
-          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
-          return ($v ? $this.__name : [string]::Empty);
-        }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
-      )
-    )
-    $this.Name = $dir.Name;
-    if (![string]::IsNullOrWhiteSpace($this.Name) -and $this.IsValid) {
-      $venvconfig = Read-Env -File ([IO.Path]::Combine($this.Path, 'pyvenv.cfg'));
-      $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
-      $this.Config.Set($c)
-    }
+  EnvManager([string]$Path) {
+    $this.BinPath = $Path
+    $this.LoadEnvironments()
   }
-  static [Venv] Create() {
-    return [Venv]::Create([IO.DirectoryInfo]::new((Resolve-Path .).Path))
+  [Object[]] Run([string]$command) {
+    return $(& ($this.BinPath) $command)
   }
-  static [Venv] Create([string]$dir) {
-    return [Venv]::Create([IO.DirectoryInfo]::new((Resolve-Path $dir).Path))
-  }
-  static [Venv] Create([IO.DirectoryInfo]$dir) {
-    return [Venv]::Create($dir.Name, $dir.Parent)
-  }
-  static [Venv] Create([string]$Name, [IO.DirectoryInfo]$dir) {
-    $venvPath = [IO.Path]::Combine($dir.FullName, $Name)
-    if (![IO.Directory]::Exists($venvPath)) { Write-Console "Create venv $Name" -f LimeGreen; python -m venv $Name }
-    $verfile = [IO.Path]::Combine($dir.FullName, ".python-version")
-    if ([IO.File]::Exists($verfile)) {
-      $ver = Get-Content $verfile; $localver = pyenv local
-      if ($localver -ne $ver) {
-        $sc = [scriptblock]::Create("pyenv install $ver")
-        Write-Console "[Python version $ver] " -f LimeGreen -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
+  [bool] CreateEnvironment([string]$Name, [string]$Path) {
+    try {
+      if (!(Test-Path $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
       }
+      & "$($this.BinPath)\python.exe" -m venv "$Path\$Name"
+      $this.Environments[$Name] = $Path
+      $this.SaveEnvironments()
+      return $true
+    } catch {
+      Write-Error "Failed to create environment: $_"
+      return $false
     }
-    return [venv]::new((Get-Item $venvPath -Force -EA Ignore))
   }
-  static [bool] IsValid([string]$dir) {
-    $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
-      $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
-      if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
-    }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
-    return $v
+  [bool] ActivateEnvironment([string]$Name) {
+    try {
+      if (!$this.Environments.ContainsKey($Name)) {
+        throw "Environment '$Name' does not exist."
+      }
+      $envPath = "$($this.Environments[$Name])\$Name\Scripts\Activate.ps1"
+      if (Test-Path $envPath) {
+        & $envPath
+        $this.CurrentEnvironment = $Name
+        return $true
+      } else {
+        throw "Activation script not found."
+      }
+    } catch {
+      Write-Error "Failed to activate environment: $_"
+      return $false
+    }
   }
-  [void] Activate() {
-    $spath = Resolve-Path ([IO.Path]::Combine($this.Path, 'bin', 'Activate.ps1')) -ea Ignore
-    if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("Venv activation script not found: $spath") }
-    &$spath
+  [bool] DeactivateEnvironment() {
+    try {
+      if ($null -eq $this.CurrentEnvironment) {
+        throw "No environment is currently active."
+      }
+      & "$($this.BinPath)\deactivate.ps1"
+      $this.CurrentEnvironment = $null
+      return $true
+    } catch {
+      Write-Error "Failed to deactivate environment: $_"
+      return $false
+    }
   }
-  [void] Delete() {
-    $this.Path | Remove-Item -Force -Recurse -Verbose:$false -ea Ignore
+  [bool] InstallPackage([string]$Package, [string]$Version) {
+    try {
+      if ($null -eq $this.CurrentEnvironment) {
+        throw "No environment is currently active."
+      }
+      if ($Version) {
+        & "$($this.Environments[$this.CurrentEnvironment])\$($this.CurrentEnvironment)\Scripts\pip.exe" install "$Package==$Version"
+      } else {
+        & "$($this.Environments[$this.CurrentEnvironment])\$($this.CurrentEnvironment)\Scripts\pip.exe" install $Package
+      }
+      return $true
+    } catch {
+      Write-Error "Failed to install package: $_"
+      return $false
+    }
+  }
+  [List[string]] ListEnvironments() {
+    return [List[string]]$this.Environments.Keys
+  }
+  [bool] DeleteEnvironment([string]$Name) {
+    try {
+      if (!$this.Environments.ContainsKey($Name)) {
+        throw "Environment '$Name' does not exist."
+      }
+      Remove-Item -Path "$($this.Environments[$Name])\$Name" -Recurse -Force
+      $this.Environments.Remove($Name)
+      $this.SaveEnvironments()
+      return $true
+    } catch {
+      Write-Error "Failed to delete environment: $_"
+      return $false
+    }
+  }
+  ### Medium Pain Points (Helpful Features)
+  [List[Hashtable]] ListPackages([string]$Environment) {
+    try {
+      if (!$this.Environments.ContainsKey($Environment)) {
+        throw "Environment '$Environment' does not exist."
+      }
+      $packages = & "$($this.Environments[$Environment])\$Environment\Scripts\pip.exe" list --format=json
+      return $packages | ConvertFrom-Json | ForEach-Object { @{
+          Name    = $_.name
+          Version = $_.version
+        } }
+    } catch {
+      Write-Error "Failed to list packages: $_"
+      return @()
+    }
+  }
+  [bool] CloneEnvironment([string]$Source, [string]$Destination) {
+    try {
+      if (!$this.Environments.ContainsKey($Source)) {
+        throw "Source environment '$Source' does not exist."
+      }
+      $sourcePath = $this.Environments[$Source]
+      $destinationPath = "$sourcePath\..\$Destination"
+      Copy-Item -Path "$sourcePath" -Destination $destinationPath -Recurse
+      $this.Environments[$Destination] = $destinationPath
+      $this.SaveEnvironments()
+      return $true
+    } catch {
+      Write-Error "Failed to clone environment: $_"
+      return $false
+    }
+  }
+  [bool] UpdatePackage([string]$Package, [string]$Version) {
+    try {
+      if ($null -eq $this.CurrentEnvironment) {
+        throw "No environment is currently active."
+      }
+      if ($Version) {
+        & "$($this.Environments[$this.CurrentEnvironment])\$($this.CurrentEnvironment)\Scripts\pip.exe" install --upgrade "$Package==$Version"
+      } else {
+        & "$($this.Environments[$this.CurrentEnvironment])\$($this.CurrentEnvironment)\Scripts\pip.exe" install --upgrade $Package
+      }
+      return $true
+    } catch {
+      Write-Error "Failed to update package: $_"
+      return $false
+    }
+  }
+  [bool] ExportEnvironment([string]$Name, [string]$OutputFile) {
+    try {
+      if (!$this.Environments.ContainsKey($Name)) {
+        throw "Environment '$Name' does not exist."
+      }
+      & "$($this.Environments[$Name])\$Name\Scripts\pip.exe" freeze > $OutputFile
+      return $true
+    } catch {
+      Write-Error "Failed to export environment: $_"
+      return $false
+    }
+  }
+  [bool] ImportEnvironment([string]$InputFile) {
+    try {
+      $packages = Get-Content $InputFile
+      foreach ($package in $packages) {
+        $this.InstallPackage($package, $null)
+      }
+      return $true
+    } catch {
+      Write-Error "Failed to import environment: $_"
+      return $false
+    }
+  }
+  ### Low Pain Points (Nice-to-Have Features)
+  [bool] CheckCompatibility([string]$Package, [string]$Version) {
+    try {
+      $result = & "$($this.BinPath)\pip.exe" check "$Package==$Version"
+      return ($result -eq "No broken dependencies")
+    } catch {
+      Write-Error "Failed to check compatibility: $_"
+      return $false
+    }
+  }
+  [Hashtable] GetDetails([string]$Name) {
+    try {
+      if (!$this.Environments.ContainsKey($Name)) {
+        throw "Environment '$Name' does not exist."
+      }
+      $details = @{
+        Name     = $Name
+        Path     = $this.Environments[$Name]
+        Packages = $this.ListPackages($Name)
+        Active   = ($this.CurrentEnvironment -eq $Name)
+      }
+      return $details
+    } catch {
+      Write-Error "Failed to get details: $_"
+      return @{}
+    }
+  }
+  [bool] SyncWithGlobal([List[string]]$Exclusions) {
+    try {
+      if ($null -eq $this.CurrentEnvironment) {
+        throw "No environment is currently active."
+      }
+      $globalPackages = & "$($this.BinPath)\pip.exe" list --format=json | ConvertFrom-Json | ForEach-Object { $_.name }
+      foreach ($package in $globalPackages) {
+        if (!($Exclusions -contains $package)) {
+          $this.InstallPackage($package, $null)
+        }
+      }
+      return $true
+    } catch {
+      Write-Error "Failed to sync with global: $_"
+      return $false
+    }
+  }
+  [EnvState] CheckStatus([string]$Name) {
+    if (!$this.Environments.ContainsKey($Name)) { throw "Environment '$Name' does not exist." }
+    $status = ''
+    try {
+      $status = switch ($true) {
+        ($this.CurrentEnvironment -eq $Name) { "active"; break }
+        default {
+          "inactive"
+        }
+      }
+    } catch {
+      throw "Failed to check status: $_"
+    }
+    return $status
+  }
+
+  # Helper Methods
+
+  # LoadEnvironments
+  [void] LoadEnvironments() {
+    # Load environments from a configuration file or registry
+    # This is a placeholder for actual implementation
+    # For example, reading from a JSON file
+    # $config = Get-Content -Path "EnvManagerConfig.json" | ConvertFrom-Json
+    # $this.Environments = $config.Environments
+  }
+
+  # SaveEnvironments
+  [void] SaveEnvironments() {
+    # Save environments to a configuration file or registry
+    # This is a placeholder for actual implementation
+    # For example, writing to a JSON file
+    # $config = @{ Environments = $this.Environments }
+    # $config | ConvertTo-Json | Set-Content -Path "EnvManagerConfig.json"
   }
 }
 
-# .LINK
-# [pipenv](https://github.com/pypa/pipEnv) wrapper
-class pipEnv {
-  [venv]$ProjectEnv
+# .SYNOPSIS
+#   Python virtual environment manager
+class pipEnv : EnvManager {
+  static [venv] $env # [pipEnv]::get_env((Resolve-Path .).Path)
   static [PsRecord]$data = [pipEnv].data #starts $null until any instance is created
-  static [InstallRequirements]$req
-  [string]$bin
   pipEnv() { $this.__init__() }
   static [pipEnv] Create() { return [pipEnv]::new() }
-
+  hidden [void] __init__() {
+    [pipEnv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
+            # Add your constant primitives here:
+            validversionregex = '^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$'
+          }").InvokeReturnAsIs()
+        }, { throw [SetValueException]::new("CONSTANTS is read-only") }
+      )
+    )
+    [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('session', $([ref]$this).Value))
+    $1st_run = $null -eq [pipEnv]::data
+    if ($1st_run) {
+      [pipEnv]::req = [pipEnv]::get_default_requirements(); $r = [pipEnv]::req; !$r.resolved ? $r.Resolve() : $null
+      [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('data', [PsRecord]::new()))
+      [pipEnv].data.set(@{
+          SelectedVersion = [version]$(python --version).Split(" ").Where({ $_ -match [pipEnv].CONSTANTS.validversionregex })[0]
+          Home            = [pipEnv]::get_work_home()
+          Os              = [xcrypt]::Get_Host_Os()
+        }
+      )
+    }
+    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [pipEnv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
+    [pipEnv].session.BinPath = (Get-Command pipenv -Type Application).Source
+    if ($1st_run) {
+      [pipEnv]::data = ([ref][pipEnv].data).Value
+    }
+  }
   [void] Install() {
-    & ($this.bin) install -q
+    & ($this.BinPath) install -q
   }
   [void] Install([string]$package) {
-    & ($this.bin) install -q $package
+    & ($this.BinPath) install -q $package
   }
   [void] Upgrade() {
     pip install --user --upgrade pipenv
   }
   [void] Remove() {
-    & ($this.bin) --rm
+    & ($this.BinPath) --rm
   }
-  static [version[]] GetPythonVersions() {
+  static hidden [version[]] get_python_versions() {
     return ((pyenv versions).Split("`n").Trim() | Select-Object @{l = "version"; e = { $l = $_; if ($l.StartsWith("*")) { $l = $l.Substring(1).TrimStart().Split(' ')[0] }; $m = $l -match [pipEnv].CONSTANTS.validversionregex; $m ? $l : "not-a-version" } } | Where-Object { $_.version -ne "not-a-version" }).version
   }
-  hidden [void] __init__() {
-    # add default requirements here. each array contains ("packageName", "description", { Install_script })
-    [List[array]]$_req = @(
+  static hidden [string] get_work_home() {
+    $xdgDataHome = [Environment]::GetEnvironmentVariable("XDG_DATA_HOME", [EnvironmentVariableTarget]::User) # For Unix-like systems
+    $whm = $xdgDataHome ? ([IO.Path]::Join($xdgDataHome, "virtualenvs")) : ([IO.Path]::Combine([Environment]::GetFolderPath("UserProfile"), ".local", "share", "virtualenvs"))
+    $exp = [IO.Path]::Combine([Environment]::ExpandEnvironmentVariables($whm), "")
+    $exp = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($exp))
+    if (![IO.Directory]::Exists($exp)) {
+      try {
+        New-Item -Path $exp -ItemType Directory -Force | Out-Null
+      } catch {
+        throw "Failed to create directory '$exp': $_"
+      }
+    }
+    return $exp
+  }
+  static hidden [string] get_activation_script() {
+    return [pipEnv]::get_activation_script((Resolve-Path .).Path)
+  }
+  static hidden [string] get_activation_script([string]$ProjectPath) {
+    # FIXME: not a reliable way to get the activation script.
+    $e = [pipEnv]::get_env($ProjectPath)
+    return ($e ? ([IO.Path]::Combine($e, 'bin', 'activate.ps1')) : '')
+  }
+  static [venv] get_env([string]$ProjectPath) {
+    [ValidateNotNullOrWhiteSpace()][string]$ProjectPath = $ProjectPath
+    if (![IO.Directory]::Exists($ProjectPath)) {
+      throw [Argumentexception]::new(
+        "Please provide a valid project path!",
+        [DirectoryNotFoundException]::new("Directory not found: $ProjectPath")
+      )
+    }
+    $reslt = $null
+    $_envs = [pipEnv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
+    if ($_envs) {
+      $reslt = $_envs.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
+      $reslt = ($reslt.count -eq 0) ? $null : [venv]::Create($reslt[0])
+    } else {
+      Write-Warning "[pipEnv] no virtual environments created yet."
+    }
+    return $reslt
+  }
+  static hidden [List[array]] get_default_requirements() {
+    # Add default requirements here. each array contains ("packageName", "description", { Install_script })
+    return @(
       ("pip", "The package installer for Python", {
         switch ([pipEnv]::data.Os) {
           'Windows' { py -m ensurepip --upgrade }
@@ -232,31 +479,105 @@ class pipEnv {
         $env:PATH = "$env:PATH;$sitepackages" }
       )
     )
-    [pipEnv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
-            # Add your constant primitives here:
-            validversionregex = '^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$'
-          }").InvokeReturnAsIs()
-        }, { throw [SetValueException]::new("CONSTANTS is read-only") }
+  }
+}
+
+
+# .SYNOPSIS
+#   python virtual environment implementation
+class venv {
+  [string]$Path
+  static [PsRecord]$Config = @{
+    Name        = "env"
+    ProjectPath = (Resolve-Path .).Path
+  }
+  static [EnvManager]$manager = [venv]::GetEnvManager("pipEnv")
+  hidden [string]$__name
+  venv() {}
+  venv([IO.DirectoryInfo]$dir) {
+    $this.Path = $dir.FullName;
+    [IO.Directory]::Exists($this.Path) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
+    $this.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
+          $v = [venv]::IsValid($this.Path)
+          $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsValid', [scriptblock]::Create("return [bool]$([int]$v)"), { throw [SetValueException]::new("IsValid is read-only") }));
+          $this.PsObject.Properties.Add([Psscriptproperty]::new('IsActive', [scriptblock]::Create("return [bool]$([int]$($has_deact_command -and $v))"), { throw [SetValueException]::new("IsActive is read-only") }));
+          return ($v ? $this.__name : [string]::Empty);
+        }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
       )
     )
-    $1st_run = $null -eq [pipEnv]::data
-    if ($1st_run) {
-      [pipEnv]::req = $_req; $r = [pipEnv]::req; !$r.resolved ? $r.Resolve() : $null
-      [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('data', [PsRecord]::new()))
-      [pipEnv].data.set(@{
-          SelectedVersion = [version]$(python --version).Split(" ").Where({ $_ -match [pipEnv].CONSTANTS.validversionregex })[0]
-          Instance        = $([ref]$this).Value
-          Os              = [xcrypt]::Get_Host_Os()
-        }
-      )
+    $this.Name = $dir.Name;
+    if (![string]::IsNullOrWhiteSpace($this.Name) -and $this.IsValid) {
+      $venvconfig = Read-Env -File ([IO.Path]::Combine($this.Path, 'pyvenv.cfg'));
+      $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
+      [venv]::Config.Set($c)
     }
-    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [pipEnv]::GetPythonVersions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
-    $this.bin = (Get-Command pipenv -Type Application).Source
-    [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('bin', $([ref]$this.bin).Value))
-    $this.ProjectEnv = [Venv]::Create()
-    if ($1st_run) {
-      [pipEnv]::data = ([ref][pipEnv].data).Value
+  }
+  static [venv] Create() {
+    return [venv]::Create([IO.DirectoryInfo]::new([venv]::Config.ProjectPath))
+  }
+  static [venv] Create([string]$dir) {
+    return [venv]::Create([IO.DirectoryInfo]::new([venv]::Config.ProjectPath))
+  }
+  static [venv] Create([IO.DirectoryInfo]$dir) {
+    return [venv]::Create($dir.Name, $dir.Parent)
+  }
+  static [venv] Create([string]$Name, [IO.DirectoryInfo]$dir) {
+    $venvPath = [IO.Path]::Combine($dir.FullName, $Name)
+    if (![IO.Directory]::Exists($venvPath)) { Write-Console "Create venv $Name" -f LimeGreen; python -m venv $Name }
+    $verfile = [IO.Path]::Combine($dir.FullName, ".python-version")
+    if ([IO.File]::Exists($verfile)) {
+      $ver = Get-Content $verfile; $localver = pyenv local
+      if ($localver -ne $ver) {
+        $sc = [scriptblock]::Create("pyenv install $ver")
+        Write-Console "[Python version $ver] " -f LimeGreen -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
+      }
     }
+    return [venv]::new((Get-Item $venvPath -Force -EA Ignore))
+  }
+  [Object[]] verify() { return [venv]::Run("verify") }
+  [Object[]] upgrade() { return [venv]::Run("upgrade") }
+  [Object[]] sync() { return [venv]::Run("sync") }
+  [Object[]] lock() { return [venv]::Run("lock") }
+  [Object[]] install() { return [venv]::Run("install") }
+
+  static [Object[]] Run([string]$command) {
+    $n = [venv]::manager.BinPath | Split-Path -Leaf
+    if ($n -eq "pipenv" -and $command -eq "shell") {
+      $e = [pipEnv]::get_env([venv]::Config.ProjectPath); $s = [IO.Path]::Combine($e.Path, 'bin', 'activate.ps1')
+      (![string]::IsNullOrWhiteSpace($e) -and ![string]::IsNullOrWhiteSpace($s)) ? $( return &$s ) : $( throw "Failed to get activation script")
+    }
+    return [venv]::manager.Run($command)
+  }
+  static [EnvManager] GetEnvManager([string]$name) {
+    $m = switch ($name) {
+      "pipenv" {
+        [pipEnv].session ? ([pipEnv].session) : ([pipEnv]::Create())
+      }
+      Default {
+        throw [Argumentexception]::new("Unknown environment manager: $name")
+      }
+    }
+    return $m
+  }
+  static [bool] IsValid([string]$dir) {
+    $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
+      $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
+      if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
+    }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
+    return $v
+  }
+  [void] activate() {
+    $spath = Resolve-Path ([IO.Path]::Combine($this.Path, 'bin', 'activate.ps1')) -ea Ignore
+    if (![IO.File]::Exists($spath)) { throw [FileNotFoundException]::new("env activation script not found: $spath") }
+    &$spath
+  }
+  static [void] Clean () {
+    # Uninstalls all packages not specified in Pipfile.lock
+    pipenv clean
+  }
+  [void] Delete() {
+    $this.Path | Remove-Item -Force -Recurse -Verbose:$false -ea Ignore
   }
 }
 
@@ -266,7 +587,7 @@ $typestoExport = @(
   [InstallRequirements],
   [Requirement],
   [pipEnv],
-  [Venv]
+  [venv]
 )
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
 foreach ($Type in $typestoExport) {
