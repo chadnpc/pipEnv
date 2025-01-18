@@ -410,3 +410,5 @@ Tests/pipEnv.Features.Tests.ps1
 Tests/pipEnv.Intergration.Tests.ps1
 Tests/Resources/Test-GitHubScript.ps1
 .env
+Pipfile.lock
+Pipfile
