@@ -16,7 +16,7 @@
   [OutputType([Venv])]
   param (
     # Project root path
-    [Parameter(Mandatory = $false, Position = 0, valueFromPipeline = $true)]
+    [Parameter(Mandatory = $false, Position = 0, ValueFromPipeline = $true)]
     [ValidateScript({
         if (![string]::IsNullOrWhiteSpace($_)) {
           return $true
@@ -25,17 +25,12 @@
         }
       }
     )][Alias('p')]
-    [string]$Path = '.',
-
-    # A custom name for the virtual environment
-    [Parameter(Mandatory = $false, Position = 1)]
-    [ValidateNotNullOrWhiteSpace()]
-    [string]$Name
+    [string]$Path = '.'
   )
   begin {
     $Path = (Resolve-Path $Path -ea Ignore).Path
     $Path = [IO.Directory]::Exists($Path) ? $Path : $(throw [System.IO.DirectoryNotFoundException]::new("Directory not found: $Path"))
-    $Name = Split-Path $Path -Leaf; [venv]::Config.CustomName = $Name; $v = $null
+    $Name = Split-Path $Path -Leaf; $v = $null
   }
   process {
     if ($PSCmdlet.ShouldProcess("Create virtual environment for $Name", $Path)) {
