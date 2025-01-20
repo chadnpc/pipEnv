@@ -9,17 +9,33 @@
   # .EXAMPLE
   #   New-PipEnv | Activate-Env
   #   same as (New-PipEnv).Activate()
+  # .EXAMPLE
+  #   $e = New-pipEnv . myEnvName
+  #   $e.Activate()
   [CmdletBinding(supportsShouldProcess = $true)]
   [OutputType([Venv])]
   param (
-    [Parameter(Mandatory = $false, Position = 0)]
+    # Project root path
+    [Parameter(Mandatory = $false, Position = 0, valueFromPipeline = $true)]
+    [ValidateScript({
+        if (![string]::IsNullOrWhiteSpace($_)) {
+          return $true
+        } else {
+          throw [System.ArgumentException]::new("Please provide a valid (NullOrWhiteSpace) directory name.", 'Path')
+        }
+      }
+    )][Alias('p')]
+    [string]$Path = '.',
+
+    # A custom name for the virtual environment
+    [Parameter(Mandatory = $false, Position = 1)]
     [ValidateNotNullOrWhiteSpace()]
-    [string]$Path = '.'
+    [string]$Name
   )
   begin {
     $Path = (Resolve-Path $Path -ea Ignore).Path
     $Path = [IO.Directory]::Exists($Path) ? $Path : $(throw [System.IO.DirectoryNotFoundException]::new("Directory not found: $Path"))
-    $Name = Split-Path $Path -Leaf; $v = $null
+    $Name = Split-Path $Path -Leaf; [venv]::Config.CustomName = $Name; $v = $null
   }
   process {
     if ($PSCmdlet.ShouldProcess("Create virtual environment for $Name", $Path)) {
