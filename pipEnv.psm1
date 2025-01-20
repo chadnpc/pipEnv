@@ -485,7 +485,6 @@ class venv {
   [PackageManager]$PackageManager
   [Dictionary[string, DependencyInfo]]$dependencies
   static [PsRecord]$Config = @{
-    CustomName       = ""
     ProjectPath      = (Resolve-Path .).Path
     SharePipcache    = $False
     RequirementsFile = "requirements.txt"
@@ -532,16 +531,16 @@ class venv {
       }
     }
     if ($null -ne $reslt) { return $reslt }
+
     Push-Location $dir.FullName;
     [void][venv]::SetLocalVersion()
     Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "Creating env ... "-f LemonChiffon -NoNewLine;
-    [venv]::Run(("install", "check"))
     # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
-    $usrEnvfile = [Path]::Combine($dir.FullName, ".env");
-    $name = [venv]::Config.CustomName
-    $name = ($name -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $name) : $name
-    if (![string]::IsNullOrWhiteSpace($name)) { "PIPENV_CUSTOM_VENV_NAME=$name" >> $usrEnvfile }
-    $usrEnvfile ? ($usrEnvfile | Remove-Item -Force -ea Ignore) : $null
+    $usrEnvfile = [FileInfo]::new([Path]::Combine($dir.FullName, ".env"))
+    $name = ($dir.BaseName -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $dir.BaseName) : $dir.BaseName
+    if (![string]::IsNullOrWhiteSpace($name)) { "PIPENV_CUSTOM_VENV_NAME=$name" >> $usrEnvfile.FullName }
+    [venv]::Run(("install", "check"))
+    $usrEnvfile.Exists ? ($usrEnvfile.FullName | Remove-Item -Force -ea Ignore) : $null
     Pop-Location; Write-Console "Done" -f Green
 
     $p = [venv]::GetEnvPath($dir.FullName)
