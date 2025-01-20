@@ -485,6 +485,7 @@ class venv {
   [PackageManager]$PackageManager
   [Dictionary[string, DependencyInfo]]$dependencies
   static [PsRecord]$Config = @{
+    CustomName       = ""
     ProjectPath      = (Resolve-Path .).Path
     SharePipcache    = $False
     RequirementsFile = "requirements.txt"
@@ -530,16 +531,20 @@ class venv {
         }
       }
     }
-    ($null -ne $reslt) ? (return $reslt) : $([progressUtil]::WaitJob("[pipEnv] Creating env for project: $($dir.BaseName)", { [venv]::Run(("install", "check")) }))
-    $verfile = [Path]::Combine($dir.FullName, ".python-version")
-    if ([IO.File]::Exists($verfile)) {
-      $ver = Get-Content $verfile; $localver = pyenv local
-      if ($localver -ne $ver) {
-        $sc = [scriptblock]::Create("pyenv install $ver")
-        Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine; [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
-      }
-    }
-    $p = [venv]::GetEnvPath($dir.FullName);
+    if ($null -ne $reslt) { return $reslt }
+    Push-Location $dir.FullName;
+    [void][venv]::SetLocalVersion()
+    Write-Console "[pipEnv] " -f SlateBlue -NoNewLine; Write-Console "Creating env ... "-f LemonChiffon -NoNewLine;
+    [venv]::Run(("install", "check"))
+    # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
+    $usrEnvfile = [Path]::Combine($dir.FullName, ".env");
+    $name = [venv]::Config.CustomName
+    $name = ($name -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $name) : $name
+    if (![string]::IsNullOrWhiteSpace($name)) { "PIPENV_CUSTOM_VENV_NAME=$name" >> $usrEnvfile }
+    $usrEnvfile ? ($usrEnvfile | Remove-Item -Force -ea Ignore) : $null
+    Pop-Location; Write-Console "Done" -f Green
+
+    $p = [venv]::GetEnvPath($dir.FullName)
     $p = [Directory]::Exists($p) ? $p : ([Path]::Combine($dir.FullName, "env"))
     return [venv]::new($p)
   }
@@ -548,6 +553,7 @@ class venv {
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir, [ref]$o) {
     [IO.Directory]::Exists($dir.FullName) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
+    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("Failed to create a venv Object", [Argumentexception]::new("$dir is not a valid venv folder", $dir)) | Write-Error }
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
@@ -581,6 +587,27 @@ class venv {
       }
     }
     return $m
+  }
+  static [Object[]] SetLocalVersion() {
+    return [venv]::SetLocalVersion([Path]::Combine((Resolve-Path .).Path, ".python-version"))
+  }
+  static [Object[]] SetLocalVersion([string]$str = "versionfile_or_version") {
+    [ValidateNotNullOrWhiteSpace()][string]$str = $str; $res = $null;
+    $ver = switch ($true) {
+      ([IO.File]::Exists($str)) {
+        $ver_in_file = Get-Content $str; $localver = pyenv local
+        ($localver -ne $ver_in_file) ? $ver_in_file : $null
+        break
+      }
+      ($str -as [version] -is [version]) { $str; break }
+      Default { $null }
+    }
+    if ($null -ne $ver) {
+      $sc = [scriptblock]::Create("pyenv install $ver")
+      Write-Console "[Python v$ver] " -f SlateBlue -NoNewLine;
+      $res = [progressUtil]::WaitJob("Installing", (Start-Job -Name "Install python $ver" -ScriptBlock $sc));
+    }
+    return $res
   }
   static [string] GetActivationScript() {
     return [venv]::GetActivationScript((Resolve-Path .).Path)
