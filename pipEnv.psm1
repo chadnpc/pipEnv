@@ -91,7 +91,7 @@ class Requirement {
 }
 
 Class InstallRequirements {
-  [Requirement[]] $list
+  [Requirement[]] $list = @()
   [bool] $resolved = $false
   [string] $jsonPath = [IO.Path]::Combine($(Resolve-Path .).Path, 'requirements.json')
 
@@ -99,6 +99,8 @@ Class InstallRequirements {
   InstallRequirements([array]$list) { $this.list = $list }
   InstallRequirements([List[array]]$list) { $this.list = $list.ToArray() }
   InstallRequirements([hashtable]$Map) { $Map.Keys | ForEach-Object { $Map[$_] ? ($this.$_ = $Map[$_]) : $null } }
+  InstallRequirements([Requirement]$req) { $this.list += $req }
+  InstallRequirements([Requirement[]]$list) { $this.list += $list }
 
   [void] Resolve() {
     $this.Resolve($false, $false)
@@ -134,7 +136,6 @@ class EnvManager {
   [validateNotNullOrEmpty()][string]$BinPath
   [string]$CurrentEnvironment
   [Dictionary[string, string]]$Environments = @{}
-  static [validateNotNullOrEmpty()][InstallRequirements]$req
 
   EnvManager() {
     $this.LoadEnvironments()
@@ -391,6 +392,7 @@ class EnvManager {
 class pipEnv : EnvManager {
   static [venv] $env # [venv]::Create((Resolve-Path .).Path)
   static [PsRecord]$data = [pipEnv].data #starts $null until any instance is created
+  static [validateNotNullOrEmpty()][InstallRequirements]$req
   pipEnv() { $this.__init__() }
   static [pipEnv] Create() { return [pipEnv]::new() }
   hidden [void] __init__() {
@@ -402,22 +404,8 @@ class pipEnv : EnvManager {
       )
     )
     [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('session', $([ref]$this).Value))
-    $1st_run = $null -eq [pipEnv]::data
-    if ($1st_run) {
-      [pipEnv]::req = [pipEnv]::get_default_requirements(); $r = [pipEnv]::req; !$r.resolved ? $r.Resolve() : $null
-      [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('data', [PsRecord]::new()))
-      [pipEnv].data.set(@{
-          SelectedVersion = [version]$(python --version).Split(" ").Where({ $_ -match [pipEnv].CONSTANTS.validversionregex })[0]
-          Home            = [pipEnv]::get_work_home()
-          Os              = [xcrypt]::Get_Host_Os()
-        }
-      )
-    }
-    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [pipEnv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
+    if ($null -eq [pipEnv]::data) { [pipEnv]::set_data() ; $r = [pipEnv]::req; !$r.resolved ? $r.Resolve() : $null }
     [pipEnv].session.BinPath = (Get-Command pipenv -Type Application).Source
-    if ($1st_run) {
-      [pipEnv]::data = ([ref][pipEnv].data).Value
-    }
   }
   [void] Install() {
     & ($this.BinPath) install -q
@@ -448,30 +436,17 @@ class pipEnv : EnvManager {
     }
     return $exp
   }
-  static hidden [List[array]] get_default_requirements() {
-    # Add default requirements here. each array contains ("packageName", "description", { Install_script })
-    return @(
-      ("pip", "The package installer for Python", {
-        switch ([pipEnv]::data.Os) {
-          'Windows' { py -m ensurepip --upgrade }
-          default { python -m ensurepip --upgrade }
-        }
-        pip install --user --upgrade pip }
-      ),
-      ("pyenv", "Python version manager", {
-        switch ([pipEnv]::data.Os) {
-          'Windows' { Write-Warning "Pyenv does not officially support Windows and does not work in Windows outside the Windows Subsystem for Linux." }
-          default { curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash }
-        } }
-      ),
-      ("pipenv", "Python virtualenv management tool", {
-        pip install pipenv --user
-        $sitepackages = python -m site --user-site
-        $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
-        # add $sitepackages to $env:PATH
-        $env:PATH = "$env:PATH;$sitepackages" }
-      )
+  static [void] set_data() {
+    [pipEnv].PsObject.Properties.Add([PsNoteproperty]::new('data', [PsRecord]::new()));
+    [pipEnv].data.set(@{
+        Home = [pipEnv]::get_work_home()
+        Os   = [xcrypt]::Get_Host_Os()
+      }
     )
+    [pipEnv]::data = ([ref][pipEnv].data).Value
+    if ($null -eq [pipEnv]::req) { [pipEnv]::req = [InstallRequirements][requirement]("pipenv", "Python virtualenv management tool", { Install-Pipenv } ) }
+    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [pipEnv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
+    [pipEnv].data.PsObject.Properties.Add([PsScriptproperty]::new('SelectedVersion', { return [version]$(python --version).Split(" ").Where({ $_ -match [pipEnv].CONSTANTS.validversionregex })[0] }, { throw [SetValueException]::new("SelectedVersion is read-only") }))
   }
 }
 
