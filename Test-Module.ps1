@@ -1,10 +1,10 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   pipEnv testScript v1.0
+#   pipEnv testScript v0.1.2
 # .EXAMPLE
-#   ./Test-Module.ps1 -version 1.0
-#   Will test the module in ./BuildOutput/pipEnv/1.0/
+#   ./Test-Module.ps1 -version 0.1.2
+#   Will test the module in ./BuildOutput/pipEnv/0.1.2/
 # .EXAMPLE
 #   ./Test-Module.ps1
 #   Will test the latest  module version in ./BuildOutput/pipEnv/

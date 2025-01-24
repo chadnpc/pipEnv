@@ -12,7 +12,7 @@
   RootModule            = 'pipEnv.psm1'
 
   # Version number of this module.
-  ModuleVersion         = '0.1.1'
+  ModuleVersion         = '0.1.2'
 
   # Supported PSEditions
   # CompatiblePSEditions = @()
@@ -30,7 +30,7 @@
   Copyright             = 'Copyright © 2025 Alain Herve. All rights reserved.'
 
   # Description of the functionality provided by this module
-  Description           = 'A collection of script files by Alain Herve'
+  Description           = 'Unofficial installer, runner and utilities for pipenv.'
 
   # Minimum version of the PowerShell engine required by this module
   PowerShellVersion     = '7.4'
@@ -51,7 +51,11 @@
   ProcessorArchitecture = 'None'
 
   # Modules that must be imported into the global environment prior to importing this module
-  RequiredModules       = @('PSScriptAnalyzer')
+  RequiredModules       = @(
+    'PSScriptAnalyzer'
+    'cliHelper.core'
+    'clihelper.env'
+  )
 
   # Assemblies that must be loaded prior to importing this module
   # RequiredAssemblies = @()
