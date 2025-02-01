@@ -9,7 +9,7 @@ function Install-Pipenv {
       param ()
 
       process {
-        switch ([pipEnv]::data.Os) {
+        switch ([venv]::data.Os) {
           'Windows' { Write-Warning "Pyenv does not officially support Windows and does not work in Windows outside the Windows Subsystem for Linux."; break }
           default { curl -L https://github.com/pyenv/pyenv-installer/raw/master/bin/pyenv-installer | bash }
         }
@@ -26,7 +26,7 @@ function Install-Pipenv {
 
       process {
         if (!(Get-Command python -type Application -ea Ignore)) { Install-Python }
-        switch ([pipEnv]::data.Os) {
+        switch ([venv]::data.Os) {
           'Windows' { python -m ensurepip --upgrade; break }
           default { python -m ensurepip --upgrade }
         }
@@ -58,7 +58,7 @@ function Install-Pipenv {
     Install-Pyenv
     pip install pipenv --user
     $sitepackages = python -m site --user-site
-    $sitepackages = [pipEnv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
+    $sitepackages = [venv]::data.Os.Equals('Windows') ? $sitepackages.Replace('site-packages', 'Scripts') : $sitepackages
     # add $sitepackages to $env:PATH
     # $env:PATH = "$env:PATH;$sitepackages"
   }
