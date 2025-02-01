@@ -1,11 +1,10 @@
-﻿# [pipEnv](https://www.powershellgallery.com/packages/pipEnv)
+﻿# [venv](https://www.powershellgallery.com/packages/pipEnv)
 
-Python project environment manager
+A python virtual environment manager using pipenv.
 
 Uses: [pipenv.pypa.io](https://pipenv.pypa.io/en/latest/)
 
-Note: This is an unofficial pipenv wrapper (installer, runner and utilities) for
-PowerShell.
+Has functions to install, run, test and uninstall pipenv in PowerShell.
 
 > Why not use pipenv directly?
 

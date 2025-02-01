@@ -1,7 +1,7 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   pipEnv buildScript v0.1.2
+#   pipEnv buildScript v0.1.3
 # .DESCRIPTION
 #   A custom build script for the module pipEnv
 # .LINK
@@ -72,7 +72,7 @@ begin {
   }
   git config --global --add safe.directory $PSScriptRoot
 }
- 
+
 process {
   Build-Module -Task $Task -Path $Path -Import:$Import
 }

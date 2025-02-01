@@ -12,7 +12,7 @@
   RootModule            = 'pipEnv.psm1'
 
   # Version number of this module.
-  ModuleVersion         = '0.1.2'
+  ModuleVersion         = '0.1.3'
 
   # Supported PSEditions
   # CompatiblePSEditions = @()
@@ -30,7 +30,7 @@
   Copyright             = 'Copyright © 2025 Alain Herve. All rights reserved.'
 
   # Description of the functionality provided by this module
-  Description           = 'Unofficial installer, runner and utilities for pipenv.'
+  Description           = 'A python virtual environment manager using pipenv. Has functions to install, run, test and uninstall pipenv in PowerShell.'
 
   # Minimum version of the PowerShell engine required by this module
   PowerShellVersion     = '7.4'
