@@ -6,7 +6,7 @@
 
     [Parameter(Mandatory = $false)]
     [Alias('Version')][ValidateScript({
-        if (($_ -as 'version') -is [version] -and $_ -in [pipEnv]::data.PythonVersions) {
+        if (($_ -as 'version') -is [version] -and $_ -in [venv]::data.PythonVersions) {
           return $true
         } else {
           throw [System.IO.InvalidDataException]::New('Please Provide a valid version')
