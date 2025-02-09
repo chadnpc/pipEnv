@@ -22,117 +22,6 @@ enum EnvManagerName {
   pipEnv
 }
 
-
-class InstallException : Exception {
-  InstallException() {}
-  InstallException([string]$message) : base($message) {}
-  InstallException([string]$message, [Exception]$innerException) : base($message, $innerException) {}
-}
-
-class InstallFailedException : InstallException {
-  InstallFailedException() {}
-  InstallFailedException([string]$message) : base($message) {}
-  InstallFailedException([string]$message, [Exception]$innerException) : base($message, $innerException) {}
-}
-
-class Requirement {
-  [string] $Name
-  [version] $Version
-  [string] $Description
-  [string] $InstallScript
-
-  Requirement() {}
-  Requirement([array]$arr) {
-    $this.Name = $arr[0]
-    $this.Version = $arr.Where({ $_ -is [version] })[0]
-    $this.Description = $arr.Where({ $_ -is [string] -and $_ -ne $this.Name })[0]
-    $__sc = $arr.Where({ $_ -is [scriptblock] })[0]
-    $this.InstallScript = ($null -ne $__sc) ? $__sc.ToString() : $arr[-1]
-  }
-  Requirement([string]$Name, [scriptblock]$InstallScript) {
-    $this.Name = $Name
-    $this.InstallScript = $InstallScript.ToString()
-  }
-  Requirement([string]$Name, [string]$Description, [scriptblock]$InstallScript) {
-    $this.Name = $Name
-    $this.Description = $Description
-    $this.InstallScript = $InstallScript.ToString()
-  }
-
-  [bool] IsInstalled() {
-    try {
-      Get-Command $this.Name -Type Application
-      return $?
-    } catch [CommandNotFoundException] {
-      return $false
-    } catch {
-      throw [InstallException]::new("Failed to check if $($this.Name) is installed", $_.Exception)
-    }
-  }
-  [bool] Resolve() {
-    return $this.Resolve($false, $false)
-  }
-  [bool] Resolve([switch]$Force, [switch]$What_If) {
-    $is_resolved = $true
-    if (!$this.IsInstalled() -or $Force.IsPresent) {
-      Write-Console "[Resolve requrement] $($this.Name) " -f Green -NoNewLine
-      if ($this.Description) {
-        Write-Console "($($this.Description)) " -f BlueViolet -NoNewLine
-      }
-      Write-Console "$($this.Version) " -f Green
-      if ($What_If.IsPresent) {
-        Write-Console "Would install: $($this.Name)" -f Yellow
-      } else {
-        [ScriptBlock]::Create("$($this.InstallScript)").Invoke()
-      }
-      $is_resolved = $?
-    }
-    return $is_resolved
-  }
-}
-
-Class InstallRequirements {
-  [Requirement[]] $list = @()
-  [bool] $resolved = $false
-  [string] $jsonPath = [IO.Path]::Combine($(Resolve-Path .).Path, 'requirements.json')
-
-  InstallRequirements() {}
-  InstallRequirements([array]$list) { $this.list = $list }
-  InstallRequirements([List[array]]$list) { $this.list = $list.ToArray() }
-  InstallRequirements([hashtable]$Map) { $Map.Keys | ForEach-Object { $Map[$_] ? ($this.$_ = $Map[$_]) : $null } }
-  InstallRequirements([Requirement]$req) { $this.list += $req }
-  InstallRequirements([Requirement[]]$list) { $this.list += $list }
-
-  [void] Resolve() {
-    $this.Resolve($false, $false)
-  }
-  [void] Resolve([switch]$Force, [switch]$What_If) {
-    $res = $true; $this.list.ForEach({ $res = $res -and $_.Resolve($Force, $What_If) })
-    $this.resolved = $res
-  }
-  [void] Import() {
-    $this.Import($this.JsonPath, $false)
-  }
-  [void] Import([switch]$throwOnFail) {
-    $this.Import($this.JsonPath, $throwOnFail)
-  }
-  [void] Import([string]$JsonPath, [switch]$throwOnFail) {
-    if ([IO.File]::Exists($JsonPath)) { $this.list = Get-Content $JsonPath | ConvertFrom-Json }; return
-    if ($throwOnFail) {
-      throw [FileNotFoundException]::new("Requirement json file not found: $JsonPath")
-    }
-  }
-  [void] Export() {
-    $this.Export($this.JsonPath)
-  }
-  [void] Export([string]$JsonPath) {
-    $this.list | ConvertTo-Json -Depth 1 -Verbose:$false | Out-File $JsonPath
-  }
-  [string] ToString() {
-    return $this | ConvertTo-Json
-  }
-}
-
 class EnvManager {
   [Dictionary[string, string]]$Environments = @{}
 
@@ -300,7 +189,7 @@ class venv : EnvManager {
     $o.Value.CreatedAt = [Datetime]::Now.ToString();
     [venv]::data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [venv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
     [venv]::data.PsObject.Properties.Add([PsScriptproperty]::new('SelectedVersion', { return [version]$(python --version).Split(" ").Where({ $_ -match [venv].CONSTANTS.validversionregex })[0] }, { throw [SetValueException]::new("SelectedVersion is read-only") }))
-    [venv]::data.Session.BinPath = (Get-Command pipenv -Type Application -ea Ignore).Source
+    # $p = python -c "import pipenv; print(pipenv.__file__)"; ie: (Get-Command pipenv -Type Application -ea Ignore).Source
     [venv]::data.set('RequirementsFile', "requirements.txt")
     ![venv]::req ? ([venv]::req = [InstallRequirements][requirement]("pipenv", "Python virtualenv management tool", { Install-Pipenv } )) : $null
     ![venv]::req.resolved ? [venv]::req.Resolve() : $null
@@ -381,15 +270,15 @@ class venv : EnvManager {
   [Object[]] upgrade() { pip install --user --upgrade pipenv; return [venv]::Run("upgrade") }
   [Object[]] sync() { return [venv]::Run("sync") }
   [Object[]] lock() { return [venv]::Run("lock") }
-  [Object[]] install() { & ([venv]::data.Session.BinPath) install -q; return [venv]::Run("install") }
-  [Object[]] Install([string]$package) { return & ([venv]::data.Session.BinPath) install -q $package }
-  [Object[]] Remove() { return & ([venv]::data.Session.BinPath) --rm }
+  [Object[]] install() { python -m pipenv install -q; return [venv]::Run("install") }
+  [Object[]] Install([string]$package) { python -m pipenv install -q $package; return [venv]::Run("install") }
+  [Object[]] Remove() { return python -m pipenv --rm }
 
   static [Object[]] Run([string[]]$commands) {
     $res = @(); foreach ($c in $commands) {
       $res += switch ($true) {
-        $(([venv]::data.Session.BinPath | Split-Path -Leaf) -eq "pipenv" -and $c -eq "shell") { [venv]::data.Session.Activate(); break }
-        default { & ([venv]::data.Session.BinPath) $c }
+        $($c -eq "shell") { [venv]::data.Session.Activate(); break }
+        default { python -m pipenv $c }
       }
     }
     return $res
@@ -520,11 +409,8 @@ class venv : EnvManager {
 #endregion Classes
 # Types that will be available to users when they import the module.
 $typestoExport = @(
-  [InstallRequirements],
   [EnvManagerName],
-  [Requirement],
   [EnvState],
-  [venv],
   [venv]
 )
 $TypeAcceleratorsClass = [PsObject].Assembly.GetType('System.Management.Automation.TypeAccelerators')
