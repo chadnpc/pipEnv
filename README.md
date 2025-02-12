@@ -39,14 +39,14 @@ hint: run `deactivate` to return
 
 - [ ] tests
 
-- [![GitHub Release Date](https://img.shields.io/github/release/alainQtec/pipEnv.svg)](https://github.com/alainQtec/pipEnv/releases)
+- [![GitHub Release Date](https://img.shields.io/github/release/chadnpc/pipEnv.svg)](https://github.com/chadnpc/pipEnv/releases)
 
 ## contributing
 
 Pull requests are welcome.
 
 ```PowerShell
-git clone https://github.com/alainQtec/pipEnv
+git clone https://github.com/chadnpc/pipEnv
 cd pipEnv
 git remote add upstream https://github.com/yourUserName/pipEnv.git
 git fetch upstream

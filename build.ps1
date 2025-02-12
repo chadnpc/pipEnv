@@ -1,11 +1,11 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   pipEnv buildScript v0.1.3
+#   pipEnv buildScript v0.1.4
 # .DESCRIPTION
 #   A custom build script for the module pipEnv
 # .LINK
-#   https://github.com/alainQtec/pipEnv/blob/main/build.ps1
+#   https://github.com/chadnpc/pipEnv/blob/main/build.ps1
 # .EXAMPLE
 #   ./build.ps1 -Task Test
 #   This Will build the module, Import it and run tests using the ./Test-Module.ps1 script.
@@ -62,7 +62,7 @@ begin {
   if ($PSCmdlet.ParameterSetName -eq 'help') { Get-Help $MyInvocation.MyCommand.Source -Full | Out-String | Write-Host -f Green; return }
   $IsGithubRun = ![string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('GITHUB_WORKFLOW'))
   if ($($IsGithubRun ? $true : $(try { (Test-Connection "https://www.github.com" -Count 2 -TimeoutSeconds 1 -ea Ignore -Verbose:$false | Select-Object -expand Status) -contains "Success" } catch { Write-Warning "Test Connection Failed. $($_.Exception.Message)"; $false }))) {
-    $req = Invoke-WebRequest -Method Get -Uri https://raw.githubusercontent.com/alainQtec/PsCraft/refs/heads/main/Public/Build-Module.ps1 -SkipHttpErrorCheck -Verbose:$false
+    $req = Invoke-WebRequest -Method Get -Uri https://raw.githubusercontent.com/chadnpc/PsCraft/refs/heads/main/Public/Build-Module.ps1 -SkipHttpErrorCheck -Verbose:$false
     if ($req.StatusCode -ne 200) { throw "Failed to download Build-Module.ps1" }
     $t = New-Item $([IO.Path]::GetTempFileName().Replace('.tmp', '.ps1')) -Verbose:$false; Set-Content -Path $t.FullName -Value $req.Content; . $t.FullName; Remove-Item $t.FullName -Verbose:$false
   } else {

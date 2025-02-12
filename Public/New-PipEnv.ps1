@@ -2,7 +2,7 @@
   # .DESCRIPTION
   #   create a new virtual environment
   # .LINK
-  #   https://github.com/alainQtec/pipEnv/blob/main/Public/New-PipEnv.ps1
+  #   https://github.com/chadnpc/pipEnv/blob/main/Public/New-PipEnv.ps1
   # .EXAMPLE
   #   New-pipEnv .
   #   Create a new virtual environment in the current directory
