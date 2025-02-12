@@ -101,7 +101,7 @@ class venv : EnvManager {
     Session       = $null
     Manager       = [EnvManagerName]::pipEnv
     Home          = [venv]::get_work_home()
-    Os            = [xcrypt]::Get_Host_Os()
+    Os            = Get-HostOs
   }
   hidden [string]$__name
   venv() {
