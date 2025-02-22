@@ -16,6 +16,7 @@
   )
 
   begin {
+    if (!(Get-Command pipenv -type Application -ea Ignore)) { pipEnv\Install-Pipenv }
     $Name = Split-Path $Path -Leaf
   }
 

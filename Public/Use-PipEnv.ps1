@@ -1,5 +1,5 @@
 ﻿function Use-pipEnv {
-  [CmdletBinding(DefaultParameterSetName = 'envdir')][Alias('Activate-Env')]
+  [CmdletBinding(DefaultParameterSetName = 'envdir')][Alias('Use-venv', 'Activate-Env')]
   param (
     [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true, ParameterSetName = 'envdir')]
     [validateScript({

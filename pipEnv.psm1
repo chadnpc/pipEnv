@@ -23,69 +23,136 @@ enum EnvManagerName {
 }
 
 class EnvManager {
-  [Dictionary[string, string]]$Environments = @{}
-
-  EnvManager() {
-    $this.LoadEnvironments()
+  static [Dictionary[string, string]]$Environments = @{}
+  static [PsRecord]$data = @{ # Cached data
+    SharePipcache = $False
+    ProjectPath   = (Resolve-Path .).Path
+    Session       = $null
+    Manager       = [EnvManagerName]::pipEnv
+    Home          = [EnvManager]::Get_work_Home()
+    Os            = Get-HostOs
   }
-  [bool] InstallPackage([string]$Package, [string]$Version) {
+
+  static [string] Get_work_Home() {
+    $xdgDataHome = [Environment]::GetEnvironmentVariable("XDG_DATA_HOME", [EnvironmentVariableTarget]::User) # For Unix-like systems
+    $whm = $xdgDataHome ? ([IO.Path]::Join($xdgDataHome, "virtualenvs")) : ([IO.Path]::Combine([Environment]::GetFolderPath("UserProfile"), ".local", "share", "virtualenvs"))
+    $exp = [IO.Path]::Combine([Environment]::ExpandEnvironmentVariables($whm), "")
+    $exp = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($exp))
+    if (![IO.Directory]::Exists($exp)) {
+      try {
+        New-Item -Path $exp -ItemType Directory -Force | Out-Null
+      } catch {
+        throw "Failed to create directory '$exp': $_"
+      }
+    }
+    return $exp
+  }
+  static [void] LoadEnvironments() {
+    # Example: Load environments from a JSON file (you can customize this)
+    $envFilePath = Join-Path $env:USERPROFILE ".python_environments.json"
+    if (Test-Path $envFilePath) {
+      [EnvManager]::Environments = Get-Content $envFilePath | ConvertFrom-Json -AsHashtable
+    } else {
+      [EnvManager]::Environments = @{}
+    }
+  }
+  static [void] SaveEnvironments() {
+    $envFilePath = Join-Path $env:USERPROFILE ".python_environments.json"
+    [EnvManager]::Environments | ConvertTo-Json | Set-Content $envFilePath
+  }
+  static [bool] InstallPackage([string]$Environment, [string]$Package, [string]$Version) {
     try {
-      if ($null -eq $this.Name) {
-        throw "No environment is currently active."
+      if (![EnvManager]::Environments.ContainsKey($Environment)) {
+        throw "Environment '$Environment' does not exist."
       }
-      if ($Version) {
-        & "$($this.Environments[$this.Name])\$($this.Name)\Scripts\pip.exe" install "$Package==$Version"
-      } else {
-        & "$($this.Environments[$this.Name])\$($this.Name)\Scripts\pip.exe" install $Package
+
+      $pipPath = [EnvManager]::GetPipPath($Environment)
+      if (!$pipPath) {
+        throw "Could not find pip for environment '$Environment'."
       }
+
+      $packageSpec = if ($Version) { "$Package==$Version" } else { $Package }
+      & $pipPath install $packageSpec
       return $true
     } catch {
       Write-Error "Failed to install package: $_"
       return $false
     }
   }
-  [bool] UpdatePackage([string]$Package, [string]$Version) {
+  static [bool] UpdatePackage([string]$Environment, [string]$Package, [string]$Version) {
     try {
-      if ($null -eq $this.Name) {
-        throw "No environment is currently active."
+      if (![EnvManager]::Environments.ContainsKey($Environment)) {
+        throw "Environment '$Environment' does not exist."
       }
-      if ($Version) {
-        & "$($this.Environments[$this.Name])\$($this.Name)\Scripts\pip.exe" install --upgrade "$Package==$Version"
-      } else {
-        & "$($this.Environments[$this.Name])\$($this.Name)\Scripts\pip.exe" install --upgrade $Package
+
+      $pipPath = [EnvManager]::GetPipPath($Environment)
+      if (!$pipPath) {
+        throw "Could not find pip for environment '$Environment'."
       }
+
+      $packageSpec = if ($Version) { "$Package==$Version" } else { $Package }
+      & $pipPath install --upgrade $packageSpec
       return $true
     } catch {
       Write-Error "Failed to update package: $_"
       return $false
     }
   }
-  [List[Hashtable]] ListPackages([string]$Environment) {
+  static [List[Hashtable]] ListPackages([string]$Environment) {
     try {
-      if (!$this.Environments.ContainsKey($Environment)) {
+      if (![EnvManager]::Environments.ContainsKey($Environment)) {
         throw "Environment '$Environment' does not exist."
       }
-      $packages = & "$($this.Environments[$Environment])\$Environment\Scripts\pip.exe" list --format=json
+
+      $pipPath = [EnvManager]::GetPipPath($Environment)
+      if (!$pipPath) {
+        throw "Could not find pip for environment '$Environment'."
+      }
+
+      $packages = & $pipPath list --format=json
       return $packages | ConvertFrom-Json | ForEach-Object { @{
           Name    = $_.name
           Version = $_.version
         } }
     } catch {
       Write-Error "Failed to list packages: $_"
-      return @()
+      return [List[Hashtable]]::new()
     }
   }
-  [List[string]] ListEnvironments() {
-    return [List[string]]$this.Environments.Keys
+  static [List[string]] ListEnvironments() {
+    return [List[string]][EnvManager]::Environments.Keys
   }
-  [void] LoadEnvironments() {
-    # Load environments from a configuration file or registry
-    # This is a placeholder for actual implementation
-    # For example, reading from a JSON file
-    # $config = Get-Content -Path "EnvManagerConfig.json" | ConvertFrom-Json
-    # $this.Environments = $config.Environments
+  static [string] GetPipPath([string]$Environment) {
+    $envPath = [EnvManager]::Environments[$Environment]
+    if (!$envPath) {
+      return $null
+    }
+    if ((xcrypt Get_Host_Os) -eq "Windows") {
+      return [IO.Path]::Combine($envPath, "Scripts", "pip.exe")
+    } else {
+      return [IO.Path]::Combine($envPath, "bin", "pip")
+    }
+  }
+  static [bool] AddEnvironment([string]$Name, [string]$Path) {
+    if ([EnvManager]::Environments.ContainsKey($Name)) {
+      Write-Error "Environment '$Name' already exists."
+      return $false
+    }
+    [EnvManager]::Environments[$Name] = $Path
+    [EnvManager]::SaveEnvironments()
+    return $true
+  }
+  static [bool] RemoveEnvironment([string]$Name) {
+    if (![EnvManager]::Environments.ContainsKey($Name)) {
+      Write-Error "Environment '$Name' does not exist."
+      return $false
+    }
+    [EnvManager]::Environments.Remove($Name)
+    [EnvManager]::SaveEnvironments()
+    return $true
   }
 }
+
 # .SYNOPSIS
 #   python virtual environment manager
 class venv : EnvManager {
@@ -95,14 +162,6 @@ class venv : EnvManager {
   [PackageManager]$PackageManager
   [validateNotNullOrEmpty()][string]$BinPath
   static [validateNotNullOrEmpty()][InstallRequirements]$req = @{ list = @() }
-  static [PsRecord]$data = @{
-    SharePipcache = $False
-    ProjectPath   = (Resolve-Path .).Path
-    Session       = $null
-    Manager       = [EnvManagerName]::pipEnv
-    Home          = [venv]::get_work_home()
-    Os            = Get-HostOs
-  }
   hidden [string]$__name
   venv() {
     [void][venv]::From([IO.DirectoryInfo]::new([venv]::data.ProjectPath), [ref]$this)
@@ -125,7 +184,7 @@ class venv : EnvManager {
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     $p = $null; $r = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
     try {
-      $path_str = $dir.FullName | GetShortPath
+      $path_str = $dir.FullName | Invoke-PathShortener
       if (![venv]::IsValid($dir.FullName)) {
         $v ? $(Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Try Create from '$path_str' ... "-f LemonChiffon -NoNewLine) : $null
         $_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
@@ -136,7 +195,7 @@ class venv : EnvManager {
         $dir
       }
     } catch {
-      $v ? $(Write-Console "Failed" -f PaleTurquoise -NoNewLine; Write-Console "`n       Search already created env in: $([venv]::data.Home | GetShortPath) ... "-f LemonChiffon -NoNewLine) : $null
+      $v ? $(Write-Console "Failed" -f PaleTurquoise -NoNewLine; Write-Console "`n       Search already created env in: $([venv]::data.Home | Invoke-PathShortener) ... "-f LemonChiffon -NoNewLine) : $null
       $p = [venv]::GetEnvPath($dir.FullName)
     } finally {
       $r = $p ? [venv]::new($p) : $null
@@ -201,20 +260,6 @@ class venv : EnvManager {
     }
     return $o.Value
   }
-  static hidden [string] get_work_home() {
-    $xdgDataHome = [Environment]::GetEnvironmentVariable("XDG_DATA_HOME", [EnvironmentVariableTarget]::User) # For Unix-like systems
-    $whm = $xdgDataHome ? ([IO.Path]::Join($xdgDataHome, "virtualenvs")) : ([IO.Path]::Combine([Environment]::GetFolderPath("UserProfile"), ".local", "share", "virtualenvs"))
-    $exp = [IO.Path]::Combine([Environment]::ExpandEnvironmentVariables($whm), "")
-    $exp = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($exp))
-    if (![IO.Directory]::Exists($exp)) {
-      try {
-        New-Item -Path $exp -ItemType Directory -Force | Out-Null
-      } catch {
-        throw "Failed to create directory '$exp': $_"
-      }
-    }
-    return $exp
-  }
   static hidden [version[]] get_python_versions() {
     return ((pyenv versions).Split("`n").Trim() | Select-Object @{l = "version"; e = { $l = $_; if ($l.StartsWith("*")) { $l = $l.Substring(1).TrimStart().Split(' ')[0] }; $m = $l -match [venv].CONSTANTS.validversionregex; $m ? $l : "not-a-version" } } | Where-Object { $_.version -ne "not-a-version" }).version
   }
@@ -251,7 +296,7 @@ class venv : EnvManager {
     return [venv]::GetEnvPath([venv]::data.ProjectPath)
   }
   static [string] GetEnvPath([string]$ProjectPath) {
-    $reslt = $null; $_env_paths = [venv]::get_work_home() | Get-ChildItem -Directory -ea Ignore
+    $reslt = $null; $_env_paths = [venv]::Get_work_Home() | Get-ChildItem -Directory -ea Ignore
     if ($null -ne $_env_paths) {
       $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
       $reslt = ($reslt.count -eq 0) ? $null : $reslt[0]

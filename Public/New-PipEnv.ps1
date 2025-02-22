@@ -4,16 +4,16 @@
   # .LINK
   #   https://github.com/chadnpc/pipEnv/blob/main/Public/New-PipEnv.ps1
   # .EXAMPLE
-  #   New-pipEnv .
+  #   New-venv
   #   Create a new virtual environment in the current directory
   # .EXAMPLE
-  #   New-PipEnv | Activate-Env
+  #   New-venv | Activate-Env
   #   same as (New-PipEnv).Activate()
   # .EXAMPLE
-  #   $e = New-pipEnv . myEnvName
+  #   $e = New-venv . myEnvName
   #   $e.Activate()
   [CmdletBinding(supportsShouldProcess = $true)]
-  [OutputType([Venv])]
+  [OutputType([Venv])][Alias('New-venv')]
   param (
     # Project root path
     [Parameter(Mandatory = $false, Position = 0, ValueFromPipeline = $true)]
@@ -28,12 +28,12 @@
     [string]$Path = '.'
   )
   begin {
-    $Path = (Resolve-Path $Path -ea Ignore).Path
+    $Path = (Resolve-Path ($Path | xcrypt GetUnResolvedPath) -ea Ignore).Path
     $Path = [IO.Directory]::Exists($Path) ? $Path : $(throw [System.IO.DirectoryNotFoundException]::new("Directory not found: $Path"))
     $Name = Split-Path $Path -Leaf; $v = $null
   }
   process {
-    if ($PSCmdlet.ShouldProcess("Create virtual environment for $Name", $Path)) {
+    if ($PSCmdlet.ShouldProcess($Path, "Create virtual environment for $Name")) {
       $v = [Venv]::Create($Path)
     }
   }
