@@ -1,17 +1,7 @@
-﻿# [venv](https://www.powershellgallery.com/packages/pipEnv)
+﻿## [**pipEnv**](https://www.powershellgallery.com/packages/pipEnv).
 
-A python virtual environment manager using pipenv.
+A module for **python virtual environment** management using [pipenv](https://pipenv.pypa.io/en/latest/).
 
-Uses: [pipenv.pypa.io](https://pipenv.pypa.io/en/latest/)
-
-Has functions to install, run, test and uninstall pipenv in PowerShell.
-
-> Why not use pipenv directly?
-
-**tldr**: Command not work => I get frustated => I build patch thing.
-
-**ex**: The command `pipenv shell` does not always work in Powershell. But this
-wrapper was created to deal with that, not manually by me everytime.
 
 ## usage
 
@@ -23,13 +13,27 @@ then
 
 ```PowerShell
 Import-Module pipEnv
-$e = New-pipEnv .
+$e = New-venv .
 $e.Activate()
 # do stuff:
 deactivate
 ```
 
 hint: run `deactivate` to return
+
+### Benefits
+
+- Automations. Ex: The module auto installs it's own requirements
+
+- Using pipenv directly?
+
+  I rarely use it / This is for convenience.
+
+  tldr: Command not work => I get frustated => I build wrapper-patch thing.
+
+  Ex: The command `pipenv shell` does not always work in Powershell.
+
+  This wrapper created to deal with those kinds of problems, not manually by me everytime.
 
 ## status
 
