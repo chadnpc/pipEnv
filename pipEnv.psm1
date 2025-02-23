@@ -75,14 +75,14 @@ class EnvManager {
       & $pipPath install $packageSpec
       return $true
     } catch {
-      Write-Error "Failed to install package: $_"
+      Write-Console "Failed to install package. $_" -f LightCoral
       return $false
     }
   }
   static [bool] UpdatePackage([string]$Environment, [string]$Package, [string]$Version) {
     try {
       if (![EnvManager]::Environments.ContainsKey($Environment)) {
-        throw "Environment '$Environment' does not exist."
+        throw [InvalidOperationException]::new("Environment '$Environment' does not exist!")
       }
 
       $pipPath = [EnvManager]::GetPipPath($Environment)
@@ -94,14 +94,14 @@ class EnvManager {
       & $pipPath install --upgrade $packageSpec
       return $true
     } catch {
-      Write-Error "Failed to update package: $_"
+      Write-Console "Failed to update package. $_" -f LightCoral
       return $false
     }
   }
   static [List[Hashtable]] ListPackages([string]$Environment) {
     try {
       if (![EnvManager]::Environments.ContainsKey($Environment)) {
-        throw "Environment '$Environment' does not exist."
+        throw [InvalidOperationException]::new("Environment '$Environment' does not exist!")
       }
 
       $pipPath = [EnvManager]::GetPipPath($Environment)
@@ -115,7 +115,7 @@ class EnvManager {
           Version = $_.version
         } }
     } catch {
-      Write-Error "Failed to list packages: $_"
+      Write-Console "Failed to list packages. $_" -f LightCoral
       return [List[Hashtable]]::new()
     }
   }
@@ -135,7 +135,7 @@ class EnvManager {
   }
   static [bool] AddEnvironment([string]$Name, [string]$Path) {
     if ([EnvManager]::Environments.ContainsKey($Name)) {
-      Write-Error "Environment '$Name' already exists."
+      Write-Console "Environment '$Name' already exists." -f LightCoral
       return $false
     }
     [EnvManager]::Environments[$Name] = $Path
@@ -144,7 +144,7 @@ class EnvManager {
   }
   static [bool] RemoveEnvironment([string]$Name) {
     if (![EnvManager]::Environments.ContainsKey($Name)) {
-      Write-Error "Environment '$Name' does not exist."
+      Write-Console "Environment '$Name' does not exist." -f LightCoral
       return $false
     }
     [EnvManager]::Environments.Remove($Name)
@@ -182,7 +182,7 @@ class venv : EnvManager {
     # .INPUTS
     #  DirectoryInfo: It can be ProjectPath or the exact path for the venv.
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
-    $p = $null; $r = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
+    $p = $null; $e = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
     try {
       $path_str = $dir.FullName | Invoke-PathShortener
       if (![venv]::IsValid($dir.FullName)) {
@@ -196,25 +196,25 @@ class venv : EnvManager {
       }
     } catch {
       $v ? $(Write-Console "Failed" -f PaleTurquoise -NoNewLine; Write-Console "`n       Search already created env in: $([venv]::data.Home | Invoke-PathShortener) ... "-f LemonChiffon -NoNewLine) : $null
-      $p = [venv]::GetEnvPath($dir.FullName)
+      $p = Search-ProjectEnvPath $dir.FullName
     } finally {
-      $r = $p ? [venv]::new($p) : $null
+      $e = $p ? [venv]::new($p) : $null
     }
-    if ($r.IsValid) { $v ? $(Write-Console "Done" -f Green) : $null; return $r } else { $v ? $(Write-Console "Failed" -f PaleVioletRed) : $null }
+    if ($e.IsValid) { $v ? $(Write-Console "Done" -f Green) : $null; return $e } else { $v ? $(Write-Console "Failed" -f PaleVioletRed) : $null }
 
     # Create new virtual environment named $dir.BaseName and save in work_home [venv]::data.Home
-    Push-Location $dir.FullName;
-    [void][venv]::SetLocalVersion()
+    Push-Location $dir.FullName
     Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Creating new env ... "-f LemonChiffon -NoNewLine;
-    # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
-    $usrEnvfile = [FileInfo]::new([Path]::Combine($dir.FullName, ".env"))
+    $usrEnvfile = [FileInfo]::new([Path]::Combine($dir.FullName, ".env"));
+    $wasNotHere = !$usrEnvfile.Exists
     $name = ($dir.BaseName -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $dir.BaseName) : $dir.BaseName
+    # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
     if (![string]::IsNullOrWhiteSpace($name)) { "PIPENV_CUSTOM_VENV_NAME=$name" >> $usrEnvfile.FullName }
-    [venv]::Run(("install", "check"))
-    $usrEnvfile.Exists ? ($usrEnvfile.FullName | Remove-Item -Force -ea Ignore) : $null
+    Invoke-PipEnv -c "install", "check"
+    if ($wasNotHere) { $usrEnvfile.FullName | Remove-Item -Force -ea Ignore }
     Pop-Location; Write-Console "Done" -f Green
-
-    $p = [venv]::GetEnvPath($dir.FullName)
+    # Search path of newly created venv
+    $p = Search-ProjectEnvPath $dir.FullName
     if (![Directory]::Exists($p)) { throw [InvalidOperationException]::new("Failed to create a venv Object", [DirectoryNotFoundException]::new("Directory not found: $p")) }
     return [venv]::new($p)
   }
@@ -226,7 +226,7 @@ class venv : EnvManager {
     #  Only if that directory is a valid env directory.
     [venv]::data.set('Session', $([ref]$o.Value).Value)
     [IO.Directory]::Exists($dir.FullName) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
-    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("Failed to create a venv Object", [Argumentexception]::new("$dir is not a valid venv folder", $dir)) | Write-Error }
+    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("Failed to create a venv Object", [Argumentexception]::new("$dir is not a valid venv folder", $dir)) | Write-Console -f LightCoral }
     [venv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
             # Add your constant primitives here:
             validversionregex = '^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$'
@@ -292,17 +292,6 @@ class venv : EnvManager {
     if (![IO.File]::Exists($s)) { throw [Exception]::new("Failed to get activation script", [FileNotFoundException]::new("file '$s' not found!")) }
     return $s
   }
-  static [string] GetEnvPath() {
-    return [venv]::GetEnvPath([venv]::data.ProjectPath)
-  }
-  static [string] GetEnvPath([string]$ProjectPath) {
-    $reslt = $null; $_env_paths = [venv]::Get_work_Home() | Get-ChildItem -Directory -ea Ignore
-    if ($null -ne $_env_paths) {
-      $reslt = $_env_paths.Where({ [IO.File]::ReadAllLines([IO.Path]::Combine($_.FullName, ".project"))[0] -eq $ProjectPath })
-      $reslt = ($reslt.count -eq 0) ? $null : $reslt[0]
-    }
-    return $reslt
-  }
   static [bool] IsValid([string]$dir) {
     $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
       $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
@@ -311,27 +300,23 @@ class venv : EnvManager {
     return $v
   }
   [Object[]] Activate() { return & ([venv]::data.Session.GetActivationScript()) }
-  [Object[]] verify() { return [venv]::Run("verify") }
-  [Object[]] upgrade() { pip install --user --upgrade pipenv; return [venv]::Run("upgrade") }
-  [Object[]] sync() { return [venv]::Run("sync") }
-  [Object[]] lock() { return [venv]::Run("lock") }
-  [Object[]] install() { python -m pipenv install -q; return [venv]::Run("install") }
-  [Object[]] Install([string]$package) { python -m pipenv install -q $package; return [venv]::Run("install") }
+  [Object[]] Verify() { return Invoke-PipEnv "verify" }
+  [Object[]] Upgrade() { pip install --user --upgrade pipenv; return Invoke-PipEnv "upgrade" }
+  [Object[]] Sync() { return Invoke-PipEnv "sync" }
+  [Object[]] Lock() { return Invoke-PipEnv "lock" }
+  [Object[]] Install() { python -m pipenv install -q; return Invoke-PipEnv "install" }
+  [Object[]] Install([string]$package) { python -m pipenv install -q $package; return Invoke-PipEnv "install" }
   [Object[]] Remove() { return python -m pipenv --rm }
 
-  static [Object[]] Run([string[]]$commands) {
-    $res = @(); foreach ($c in $commands) {
-      $res += switch ($true) {
-        $($c -eq "shell") { [venv]::data.Session.Activate(); break }
-        default { python -m pipenv $c }
-      }
-    }
-    return $res
+  static [string] get_pipenv_script() {
+    $p = Get-Command pipenv -CommandType Application -ea Ignore | Select-Object -First 1 | Select-Object -Expand Source
+    $s = python -m site --user-site; $s = ((xcrypt Get_Host_Os) -eq 'Windows') ? $s.Replace('site-packages', 'Scripts') : $s
+    return [string]::IsNullOrEmpty($p) ? ([IO.Path]::combine($s, 'pipenv', '__main__.py')) : $p
   }
   [bool] Clone([string]$Source, [string]$Destination) {
     try {
       if (!$this.Environments.ContainsKey($Source)) {
-        throw "Source environment '$Source' does not exist."
+        throw [InvalidOperationException]::new("Source environment '$Source' does not exist!")
       }
       $sourcePath = $this.Environments[$Source]
       $destinationPath = "$sourcePath\..\$Destination"
@@ -340,7 +325,7 @@ class venv : EnvManager {
       $this.Save()
       return $true
     } catch {
-      Write-Error "Failed to clone environment: $_"
+      Write-Console "Failed to clone environment. $_" -f LightCoral
       return $false
     }
   }
@@ -349,10 +334,10 @@ class venv : EnvManager {
       if (!$this.Environments.ContainsKey($Name)) {
         throw "Environment '$Name' does not exist."
       }
-      & "$($this.Environments[$Name])\$Name\Scripts\pip.exe" freeze > $OutputFile
+      & "$($this.Environments[$Name])/$Name/Scripts/pip.exe" freeze > $OutputFile
       return $true
     } catch {
-      Write-Error "Failed to export environment: $_"
+      Write-Console "Failed to export environment. $_" -f LightCoral
       return $false
     }
   }
@@ -364,16 +349,16 @@ class venv : EnvManager {
       }
       return $true
     } catch {
-      Write-Error "Failed to import environment: $_"
+      Write-Console "Failed to import environment. $_" -f LightCoral
       return $false
     }
   }
   [bool] CheckCompatibility([string]$Package, [string]$Version) {
     try {
-      $result = & "$($this.BinPath)\pip.exe" check "$Package==$Version"
+      $result = & "$($this.BinPath)/pip.exe" check "$Package==$Version"
       return ($result -eq "No broken dependencies")
     } catch {
-      Write-Error "Failed to check compatibility: $_"
+      Write-Console "Failed to check compatibility: $_" -f LightCoral
       return $false
     }
   }
@@ -390,7 +375,7 @@ class venv : EnvManager {
       }
       return $details
     } catch {
-      Write-Error "Failed to get details: $_"
+      Write-Console "Failed to get details. $_" -f LightCoral
       return @{}
     }
   }
@@ -399,7 +384,7 @@ class venv : EnvManager {
       if ($null -eq $this.Name) {
         throw "No environment is currently active."
       }
-      $globalPackages = & "$($this.BinPath)\pip.exe" list --format=json | ConvertFrom-Json | ForEach-Object { $_.name }
+      $globalPackages = & "$($this.BinPath)/pip.exe" list --format=json | ConvertFrom-Json | ForEach-Object { $_.name }
       foreach ($package in $globalPackages) {
         if (!($Exclusions -contains $package)) {
           $this.InstallPackage($package, $null)
@@ -407,7 +392,7 @@ class venv : EnvManager {
       }
       return $true
     } catch {
-      Write-Error "Failed to sync with global: $_"
+      Write-Console "Failed to sync with global. $_" -f LightCoral
       return $false
     }
   }
@@ -429,13 +414,13 @@ class venv : EnvManager {
   [bool] Deactivate() {
     try {
       if ($null -eq $this.Name) {
-        throw "No environment is currently active."
+        throw [System.InvalidOperationException]::new("No environment is currently active.")
       }
-      & "$($this.BinPath)\deactivate.ps1"
+      & "$($this.BinPath)/deactivate.ps1"
       $this.Name = $null
       return $true
     } catch {
-      Write-Error "Failed to deactivate environment: $_"
+      Write-Console "Failed to deactivate environment. $_" -f LightCoral
       return $false
     }
   }
