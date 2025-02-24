@@ -16,24 +16,33 @@ Import-Module pipEnv
 $e = New-venv .
 $e.Activate()
 # do stuff:
-deactivate
+$e.Dispose()
+#same as: deactivate but also deletes the venv directory
 ```
 
-hint: run `deactivate` to return
+`Automation examples`
 
-### Benefits
+- On First time usage, The module auto installs all requirements:
 
-- Automations. Ex: The module auto installs it's own requirements
+  https://github.com/user-attachments/assets/171f6913-9119-4582-b51a-d865cd90a0e3
 
-- Using pipenv directly?
+
+- every next time, its faster:
+
+  https://github.com/user-attachments/assets/0fb91653-cdf0-4d21-9d1f-edcf91adeee6
+
+### faqs
+
+- why not just use pipenv directly?
 
   I rarely use it / This is for convenience.
 
   tldr: Command not work => I get frustated => I build wrapper-patch thing.
 
+  This wrapper created to deal with those kinds of problems, so I dont have to deal with them manually everytime.
+
   Ex: The command `pipenv shell` does not always work in Powershell.
 
-  This wrapper created to deal with those kinds of problems, not manually by me everytime.
 
 ## contributing
 
