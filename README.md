@@ -35,16 +35,6 @@ hint: run `deactivate` to return
 
   This wrapper created to deal with those kinds of problems, not manually by me everytime.
 
-## status
-
-- [x] wrapper. 60% complete
-
-- [x] utilities
-
-- [ ] tests
-
-- [![GitHub Release Date](https://img.shields.io/github/release/chadnpc/pipEnv.svg)](https://github.com/chadnpc/pipEnv/releases)
-
 ## contributing
 
 Pull requests are welcome.

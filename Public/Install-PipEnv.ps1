@@ -29,7 +29,7 @@
 
   end {
     if (!$skip_minst) {
-      Write-Console "TEST: gcm pipenv" -f Yellow
+      Write-Console "verifying: gcm pipenv " -f Yellow -NoNewLine
       $has_pipenv.Invoke() ? (Write-Console "Successfully installed pipenv" -f LimeGreen) : (Write-Console "pipenv install failed" -f LightCoral)
     } else {
       Write-Console "$(pipenv --version) is already installed" -f LimeGreen

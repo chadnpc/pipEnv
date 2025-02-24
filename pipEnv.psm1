@@ -79,6 +79,20 @@ class EnvManager {
       return $false
     }
   }
+  static [string] FindEnvFile() {
+    return [EnvManager]::FindEnvFile((Resolve-Path .).Path)
+  }
+  static [string] FindEnvFile([string]$folderPath) {
+    $envFilePriority = @(".env.local", ".env", ".env.development", ".env.production", ".env.test")
+    $files = Get-ChildItem -File -Path $folderPath -Force
+    foreach ($envFile in $envFilePriority) {
+      $foundFile = $files.Where({ $_.Name -eq $envFile }) | Select-Object -First 1
+      if ($foundFile) {
+        return $foundFile.FullName
+      }
+    }
+    return [IO.Path]::Combine($folderPath, ".env")
+  }
   static [bool] UpdatePackage([string]$Environment, [string]$Package, [string]$Version) {
     try {
       if (![EnvManager]::Environments.ContainsKey($Environment)) {
@@ -155,12 +169,11 @@ class EnvManager {
 
 # .SYNOPSIS
 #   python virtual environment manager
-class venv : EnvManager {
+class venv : EnvManager, IDisposable {
   [string]$Path
   [string]$CreatedAt
   [version]$PythonVersion
   [PackageManager]$PackageManager
-  [validateNotNullOrEmpty()][string]$BinPath
   static [validateNotNullOrEmpty()][InstallRequirements]$req = @{ list = @() }
   hidden [string]$__name
   venv() {
@@ -184,49 +197,50 @@ class venv : EnvManager {
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     $p = $null; $e = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
     try {
-      $path_str = $dir.FullName | Invoke-PathShortener
+      $_p_short = $dir.FullName | Invoke-PathShortener
       if (![venv]::IsValid($dir.FullName)) {
-        $v ? $(Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Try Create from '$path_str' ... "-f LemonChiffon -NoNewLine) : $null
+        $v ? $(Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Try Create from '$_p_short' ... "-f LemonChiffon -NoNewLine) : $null
         $_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
-        if ($_env_paths.count -eq 0) { throw "No environment directory found for in '$path_str' ." }
-        if ($_env_paths.count -gt 1) { throw "Multiple environment directories found in '$path_str' ." }
+        if ($_env_paths.count -eq 0) { throw "No environment directory found for in '$_p_short' ." }
+        if ($_env_paths.count -gt 1) { throw "Multiple environment directories found in '$_p_short' ." }
         $p = $_env_paths[0].FullName;
       } else {
         $dir
       }
     } catch {
-      $v ? $(Write-Console "Failed" -f PaleTurquoise -NoNewLine; Write-Console "`n       Search already created env in: $([venv]::data.Home | Invoke-PathShortener) ... "-f LemonChiffon -NoNewLine) : $null
-      $p = Search-ProjectEnvPath $dir.FullName
+      $v ? $(Write-Console "✖" -f PaleTurquoise -NoNewLine; Write-Console "`n       Search already created env in: $([venv]::data.Home | Invoke-PathShortener) ... "-f LemonChiffon -NoNewLine) : $null
+      $p = [venv]::get_project_envpath($dir.FullName)
     } finally {
       $e = $p ? [venv]::new($p) : $null
     }
-    if ($e.IsValid) { $v ? $(Write-Console "Done" -f Green) : $null; return $e } else { $v ? $(Write-Console "Failed" -f PaleVioletRed) : $null }
+    if ($e.IsValid) { $v ? $(Write-Console "Done" -f Green) : $null; return $e } else { $v ? $(Write-Console "✖" -f PaleVioletRed) : $null }
 
     # Create new virtual environment named $dir.BaseName and save in work_home [venv]::data.Home
     Push-Location $dir.FullName
     Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Creating new env ... "-f LemonChiffon -NoNewLine;
-    $usrEnvfile = [FileInfo]::new([Path]::Combine($dir.FullName, ".env"));
+    $usrEnvfile = [FileInfo]::new([venv]::FindEnvFile());
     $wasNotHere = !$usrEnvfile.Exists
     $name = ($dir.BaseName -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $dir.BaseName) : $dir.BaseName
     # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
-    if (![string]::IsNullOrWhiteSpace($name)) { "PIPENV_CUSTOM_VENV_NAME=$name" >> $usrEnvfile.FullName }
-    Invoke-PipEnv -c "install", "check"
+    if (![string]::IsNullOrWhiteSpace($name)) {
+      Edit-EnvCfg -Path $usrEnvfile.FullName -Pair ([KeyValuePair[string, string]]::new("PIPENV_CUSTOM_VENV_NAME", $name))
+    }
+    Invoke-PipEnv "install", "check"
     if ($wasNotHere) { $usrEnvfile.FullName | Remove-Item -Force -ea Ignore }
     Pop-Location; Write-Console "Done" -f Green
     # Search path of newly created venv
-    $p = Search-ProjectEnvPath $dir.FullName
-    if (![Directory]::Exists($p)) { throw [InvalidOperationException]::new("Failed to create a venv Object", [DirectoryNotFoundException]::new("Directory not found: $p")) }
+    $p = [venv]::get_project_envpath($dir.FullName)
+    if (![Directory]::Exists("$p")) { throw [InvalidOperationException]::new("Failed to create a venv Object", [DirectoryNotFoundException]::new("Directory not found: $p")) }
     return [venv]::new($p)
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir, [ref]$o) {
     # .SYNOPSIS
-    #  venv object initializer (like __init__ ), Loads the venv object from directory info
+    #  Loads the venv object from directory info
     # .DESCRIPTION
     #  Does not create a new venv, meaning it can create a valid venv object from a directory
     #  Only if that directory is a valid env directory.
     [venv]::data.set('Session', $([ref]$o.Value).Value)
     [IO.Directory]::Exists($dir.FullName) ? ($dir | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
-    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("Failed to create a venv Object", [Argumentexception]::new("$dir is not a valid venv folder", $dir)) | Write-Console -f LightCoral }
     [venv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
             # Add your constant primitives here:
             validversionregex = '^(0|[1-9]\d*)(\.(0|[1-9]\d*)){0,3}$'
@@ -234,6 +248,7 @@ class venv : EnvManager {
         }, { throw [SetValueException]::new("CONSTANTS is read-only") }
       )
     )
+    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("$dir is not a valid venv folder") | Write-Console -f LightCoral }
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
@@ -243,8 +258,9 @@ class venv : EnvManager {
         }, { Param([string]$n) [string]::IsNullOrWhiteSpace("$($this.__name) ".Trim()) ? ($this.__name = $n) : $null }
       )
     )
-    # $o.Value.Name = $dir.Name;
+    $o.Value.Name = $dir.Name;
     $o.Value.Path = $dir.FullName; #the exact path for the venv
+    $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('BinPath', { return [IO.Path]::Combine($this.Path, "bin") }, { throw [SetValueException]::new("BinPath is read-only") }))
     $o.Value.CreatedAt = [Datetime]::Now.ToString();
     [venv]::data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [venv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
     [venv]::data.PsObject.Properties.Add([PsScriptproperty]::new('SelectedVersion', { return [version]$(python --version).Split(" ").Where({ $_ -match [venv].CONSTANTS.validversionregex })[0] }, { throw [SetValueException]::new("SelectedVersion is read-only") }))
@@ -253,8 +269,8 @@ class venv : EnvManager {
     ![venv]::req ? ([venv]::req = [InstallRequirements][requirement]("pipenv", "Python virtualenv management tool", { Install-Pipenv } )) : $null
     ![venv]::req.resolved ? [venv]::req.Resolve() : $null
     $o.Value.PythonVersion = [venv]::data.selectedversion;
-    if (![string]::IsNullOrWhiteSpace($o.Value.Name) -and $o.Value.IsValid) {
-      $venvconfig = Read-Env -File ([IO.Path]::Combine($dir.FullName, 'pyvenv.cfg'));
+    if (![string]::IsNullOrWhiteSpace($dir.Name) -and $o.Value.IsValid) {
+      $venvconfig = Read-Env -File ([IO.Path]::Combine($o.Value.Path, 'pyvenv.cfg'));
       $c = @{}; $venvconfig.Name.ForEach({ $n = $_; $c[$n] = $venvconfig.Where({ $_.Name -eq $n }).value });
       [venv]::data.Set($c)
     }
@@ -308,6 +324,8 @@ class venv : EnvManager {
   [Object[]] Install([string]$package) { python -m pipenv install -q $package; return Invoke-PipEnv "install" }
   [Object[]] Remove() { return python -m pipenv --rm }
 
+  static [IO.DirectoryInfo] get_project_envpath() { return Search-ProjectEnvPath }
+  static [IO.DirectoryInfo] get_project_envpath([string]$ProjectPath) { return Search-ProjectEnvPath $ProjectPath }
   static [string] get_pipenv_script() {
     $p = Get-Command pipenv -CommandType Application -ea Ignore | Select-Object -First 1 | Select-Object -Expand Source
     $s = python -m site --user-site; $s = ((xcrypt Get_Host_Os) -eq 'Windows') ? $s.Replace('site-packages', 'Scripts') : $s
@@ -355,7 +373,7 @@ class venv : EnvManager {
   }
   [bool] CheckCompatibility([string]$Package, [string]$Version) {
     try {
-      $result = & "$($this.BinPath)/pip.exe" check "$Package==$Version"
+      $result = pip check "$Package==$Version"
       return ($result -eq "No broken dependencies")
     } catch {
       Write-Console "Failed to check compatibility: $_" -f LightCoral
@@ -384,7 +402,7 @@ class venv : EnvManager {
       if ($null -eq $this.Name) {
         throw "No environment is currently active."
       }
-      $globalPackages = & "$($this.BinPath)/pip.exe" list --format=json | ConvertFrom-Json | ForEach-Object { $_.name }
+      $globalPackages = pip list --format=json | ConvertFrom-Json | ForEach-Object { $_.name }
       foreach ($package in $globalPackages) {
         if (!($Exclusions -contains $package)) {
           $this.InstallPackage($package, $null)
@@ -416,7 +434,11 @@ class venv : EnvManager {
       if ($null -eq $this.Name) {
         throw [System.InvalidOperationException]::new("No environment is currently active.")
       }
-      & "$($this.BinPath)/deactivate.ps1"
+      if ([bool](Get-Command deactivate -CommandType Function -ea Ignore)) {
+        deactivate
+      } else {
+        & "$($this.BinPath)/deactivate.ps1"
+      }
       $this.Name = $null
       return $true
     } catch {
@@ -433,6 +455,10 @@ class venv : EnvManager {
   }
   [void] Delete() {
     $this.Path | Remove-Item -Force -Recurse -Verbose:$false -ea Ignore
+  }
+  [void] Dispose() {
+    $this.Deactivate()
+    $this.Delete()
   }
 }
 

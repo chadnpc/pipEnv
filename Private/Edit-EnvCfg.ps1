@@ -1,12 +1,11 @@
 function Edit-EnvCfg {
   [CmdletBinding()]
   param (
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $false, Position = 0)]
     [string]$Path = "pyvenv.cfg",
 
-    [Parameter(Mandatory = $true)]
-    [System.Collections.Generic.KeyValuePair[String, String]]$Pair
-
+    [Parameter(Mandatory = $true, Position = 1)]
+    [System.Collections.Generic.KeyValuePair[string, string]]$Pair
   )
 
   process {
