@@ -1,4 +1,20 @@
 function Edit-EnvCfg {
+  # .SYNOPSIS
+  #   Edit a key in a pyvenv.cfg file
+  # .DESCRIPTION
+  #   Edit a key in a pyvenv.cfg file
+  # .PARAMETER Path
+  #   The path to the pyvenv.cfg file
+  # .PARAMETER Key
+  #   The key to edit
+  # .PARAMETER Value
+  #   The new value for the key
+  # .EXAMPLE
+  #  Edit-EnvCfg -Path ./.env -Key "PIPENV_CUSTOM_VENV_NAME" -Value "pipenvtools"
+  #  Changes the value
+  # .EXAMPLE
+  #  Edit-EnvCfg -Path "pyvenv.cfg" -Key "NEW_KEY" -Value "new-value"
+  #  Adds a new key
   [CmdletBinding()]
   param (
     [Parameter(Mandatory = $false, Position = 0)]
@@ -17,12 +33,21 @@ function Edit-EnvCfg {
   process {
     $_cp = [IO.FileInfo]::new(($Path | xcrypt GetUnResolvedPath))
     if ($_cp.Exists) {
-      # discardedbcz it deletes comments
-      # $cfg = Read-Env $_cp.FullName
-      # $cfg = $cfg | Select-Object @{ l = 'Name'; e = { $_.Name } }, @{ l = 'value'; e = { ($_.Name -eq $Key) ? $Value : $_.Value } }
-      # $str = ''; $cfg.ForEach({ $str += "{0} = {1}`n" -f $_.Name, $_.value });
-      # [void][IO.File]::WriteAllText($_cp.FullName, $str.TrimEnd())
-      "$Key = $Value" | Out-File $_cp.FullName -Append
+      $content = Get-Content -Path $_cp.FullName
+      $regex = "(?m)^($Key\s*=\s*)(.*)$"
+      $replaced = $false
+
+      for ($i = 0; $i -lt $content.Count; $i++) {
+        if ($content[$i] -match $regex) {
+          $content[$i] = $content[$i] -replace $regex, ('${1}' + $Value)
+          $replaced = $true
+        }
+      }
+
+      if (-not $replaced) {
+        $content += "$Key = $Value"
+      }
+      Set-Content -Path $_cp.FullName -Value $content
     }
   }
 }
