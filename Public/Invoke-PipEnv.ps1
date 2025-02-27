@@ -12,23 +12,21 @@
   )
 
   begin {
-    $result = @(); if (![venv]::has_pyenv()) { Install-PyEnv }
-    $py = [IO.FileInfo]::new("/$(Get-Variable HOME -ValueOnly)/.pyenv/shims/python")
-    if (!$py.Exists) { throw [Exception]::new("Python not found", [FileNotFoundException]::new("file '$py' not found!")) }
-    # Write-Debug ("pipenv_main_py is: {0}" -f [IO.Path]::combine($(&$py.FullName -m site --user-site; $s = ((xcrypt Get_Host_Os) -eq 'Windows') ? $s.Replace('site-packages', 'Scripts') : $s), 'pipenv', '__main__.py'))
+    $result = @();
     $preset_command_actions = @{
       shell = {
         $session = [venv]::data.Session
         if ($null -ne $session) {
           $session.Activate()
         } else {
-          Write-Console "No active session found!" -f LightCoral
+          Write-Console "[✖] " -f Red -NoNewLine ; Write-Console "No active session found!" -f LightCoral
         }
       }
     }
   }
 
   process {
+    $py = [venv]::GetPythonExecutable()
     if ($null -ne $commands) {
       foreach ($c in $commands) {
         if ($c -in $preset_command_actions.Keys) {
