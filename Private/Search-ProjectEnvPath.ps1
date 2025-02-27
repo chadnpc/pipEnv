@@ -8,7 +8,7 @@
   [CmdletBinding()][OutputType([System.IO.DirectoryInfo])]
   param (
     [Parameter(Position = 0, Mandatory = $false, ValueFromPipeline = $true)]
-    [string]$ProjectPath = [IO.Directory]::Exists([venv]::data.ProjectPath) ? [venv]::data.ProjectPath : (Resolve-Path .).Path
+    [string]$ProjectPath = (Resolve-Path .).Path
   )
 
   begin {
