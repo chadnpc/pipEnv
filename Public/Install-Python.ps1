@@ -48,9 +48,9 @@ function Install-Python {
     # Verify Python installation
     try {
       $pythonVersion = python --version 2>&1
-      Write-Console "Successfully installed $pythonVersion" -f LimeGreen
+      Write-Console "[+] Successfully installed $pythonVersion" -f LimeGreen
     } catch {
-      Write-Console "Failed to verify Python installation: $_" -f LightCoral
+      Write-Console "[✖] " -f Red -NoNewLine ; Write-Console "Failed to verify Python installation: $_" -f LightCoral
     }
   }
 }

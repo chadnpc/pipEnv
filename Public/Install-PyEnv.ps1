@@ -10,11 +10,10 @@
     [switch]$Force
   )
   begin {
-    $has_pyenv = { return [bool](Get-Command pyenv -type Application -ea Ignore) }
-    $skip_inst = !$Force -and $has_pyenv.Invoke()
+    $skip_install = !$Force -and [venv]::has_pyenv()
   }
   process {
-    if ($skip_inst) { return }
+    if ($skip_install) { return }
     # First we add to PATH
     $add_to_path = "cliHelper.env\Set-Env -Name PATH -Scope 'Machine' -Value ('{0}{1}{2}' -f `$env:PATH, [IO.Path]::PathSeparator, '${Home}/.pyenv/bin')"
     [scriptblock]::Create($add_to_path).Invoke()
@@ -38,10 +37,10 @@
     }
   }
   end {
-    if (!$skip_inst) {
-      $(Write-Console "verifying: gcm pyenv " -f Yellow -NoNewLine; $has_pyenv.Invoke()) ? (Write-Console "Successfully installed pyenv" -f LimeGreen) : (Write-Console "pyenv install failed" -f LightCoral)
+    if (!$skip_install) {
+      $(Write-Console "verifying: gcm pyenv " -f Yellow -NoNewLine; [venv]::has_pyenv()) ? (Write-Console "Successfully installed pyenv" -f LimeGreen) : (Write-Console "pyenv install failed" -f LightCoral)
     } else {
-      Write-Console "$(pyenv --version) is already installed" -f LimeGreen
+      Write-Console "[+] $(pyenv --version) is already installed" -f LimeGreen
     }
   }
 }

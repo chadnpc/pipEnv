@@ -13,11 +13,14 @@ then
 
 ```PowerShell
 Import-Module pipEnv
+
 $e = New-venv .
 $e.Activate()
 # do stuff:
 $e.Dispose()
 #same as: deactivate but also deletes the venv directory
+
+Invoke-PipEnv -?
 ```
 
 `Automation examples`
