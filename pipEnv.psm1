@@ -28,9 +28,9 @@ class EnvironmentNotFoundException : Exception {
 
 class EnvManager {
   static [Dictionary[string, string]]$Environments = @{}
-  static [PsRecord]$data = @{ # Cached data
+  static [PsRecord]$data = @{
     SharePipcache = $False
-    ProjectPath   = (Resolve-Path .).Path
+    ProjectPath   = { return (Resolve-Path .).Path }
     Session       = $null
     Manager       = [EnvManagerName]::pipEnv
     Home          = [EnvManager]::Get_work_Home()
@@ -200,41 +200,49 @@ class venv : EnvManager, IDisposable {
     # .INPUTS
     #  DirectoryInfo: It can be ProjectPath or the exact path for the venv.
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
-    $p = $dir.FullName; $e = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
-    try {
-      if (![venv]::IsValid($dir.FullName)) {
-        $_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
-        if ($_env_paths.count -eq 0) { throw [EnvironmentNotFoundException]::new("No environment directory found for in $dir") }
-        if ($_env_paths.count -gt 1) { throw [EnvironmentNotFoundException]::new("Multiple environment directories found in $dir") }
+    $new = $null; $p = $dir.FullName; $e = $null; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
+
+    if (![venv]::IsValid($dir.FullName)) {
+      $_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
+      if ($_env_paths.count -eq 0 -or $_env_paths.count -gt 1) {
+        # if ($_env_paths.count -eq 0) { throw [EnvironmentNotFoundException]::new("No environment directory found for in $dir") }
+        # if ($_env_paths.count -gt 1) { throw [EnvironmentNotFoundException]::new("Multiple environment directories found in $dir") }
+        $v ? $(Write-Debug "[venv] Try using already created env in: $([venv]::data.Home | Invoke-PathShortener) ... ") : $null
+        $p = [venv]::get_project_envpath($dir.FullName)
+      } else {
         $p = $_env_paths[0].FullName
       }
-    } catch [EnvironmentNotFoundException] {
-      $v ? $(Write-Debug "[venv] Try using already created env in: $([venv]::data.Home | Invoke-PathShortener) ... ") : $null
-      $p = [venv]::get_project_envpath($dir.FullName)
-    } catch {
-      throw $_
-    } finally {
-      $e = $p ? [venv]::new($p) : $null
     }
+    $e = $p ? [venv]::new($p) : $null
+
     if ($e.IsValid) { return $e }
     # Create new virtual environment named $dir.BaseName and save in work_home [venv]::data.Home
     $_root_path = (Resolve-Path .).Path
-    Set-Location $dir.FullName
-    $v ? $(Write-Console "[venv] " -f SlateBlue -NoNewLine; Write-Console "Creating new env for '$($dir.FullName | Invoke-PathShortener)' ... "-f LemonChiffon -NoNewLine) : $null
     $usrEnvfile = [IO.FileInfo]::new([venv]::FindEnvFile());
     $wasNotHere = !$usrEnvfile.Exists
     $name = ($dir.BaseName -as [version] -is [version]) ? ("{0}_{1}" -f $dir.Parent.BaseName, $dir.BaseName) : $dir.BaseName
     # https://pipenv.pypa.io/en/latest/virtualenv.html#virtual-environment-name
     if (![string]::IsNullOrWhiteSpace($name)) {
-      Edit-EnvCfg -Path $usrEnvfile.FullName -Pair ([KeyValuePair[string, string]]::new("PIPENV_CUSTOM_VENV_NAME", $name))
+      Edit-EnvCfg -Path $usrEnvfile.FullName -key "PIPENV_CUSTOM_VENV_NAME" -value $name
     }
-    Invoke-PipEnv "install", "check"
-    Set-Location $_root_path; if ($wasNotHere) { $usrEnvfile.FullName | Remove-Item -Force -ea Ignore }
-    $v ? $(Write-Console "Done" -f Green) : $null
-    # Search path of newly created venv
-    $p = [venv]::get_project_envpath($dir.FullName)
-    if (![IO.Directory]::Exists("$p")) { throw [InvalidOperationException]::new("Failed to create a venv Object", [DirectoryNotFoundException]::new("Directory '$p' not found")) }
-    return [venv]::new($p)
+    try {
+      Set-Location $dir.FullName
+      Write-Console "[venv] Creating virtual env for '$($dir.FullName | Invoke-PathShortener)' ... " -f PaleTurquoise -NoNewLine
+      Invoke-PipEnv "install", "check"
+      $p = [venv]::get_project_envpath($dir.FullName);
+      if ([IO.Directory]::Exists("$p")) {
+        $new = [venv]::new($p)
+      } else {
+        $new = [venv]::Create()
+      }
+      Write-Console "Done" -f Green
+    } catch {
+      throw [InvalidOperationException]::new("Failed to create a venv Object", $_.Exception) | Write-Console -f PaleTurquoise
+    } finally {
+      Set-Location $_root_path;
+      if ($wasNotHere) { $usrEnvfile.FullName | Remove-Item -Force -ea Ignore }
+    }
+    return $new
   }
   static hidden [venv] From([IO.DirectoryInfo]$dir, [ref]$o) {
     # .SYNOPSIS
@@ -251,7 +259,7 @@ class venv : EnvManager, IDisposable {
         }, { throw [SetValueException]::new("CONSTANTS is read-only") }
       )
     )
-    if (![venv]::IsValid($dir.FullName)) { [InvalidOperationException]::new("$dir is not a valid venv folder") | Write-Console -f LightCoral }
+    if (![venv]::IsValid($dir.FullName)) { throw [InvalidOperationException]::new("$dir is not a valid venv folder") }
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
@@ -449,13 +457,12 @@ class venv : EnvManager, IDisposable {
       if (!$this.__Isdisposed) {
         if ([bool](Get-Command deactivate -CommandType Function -ea Ignore)) {
           deactivate
-        } else {
-          & "$($this.BinPath)/deactivate.ps1"
         }
         $this.Name = $null
         return $true
+      } else {
+        Write-Console "[✖] " -f Red -NoNewLine; Write-Console "Environment is already disposed." -f LightCoral
       }
-      Write-Console "[✖] " -f Red -NoNewLine; Write-Console "Environment is already disposed." -f LightCoral
     } catch {
       Write-Console "[✖] " -f Red -NoNewLine; Write-Console "Failed to deactivate environment. $_" -f LightCoral
     }
