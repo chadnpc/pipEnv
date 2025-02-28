@@ -1,12 +1,15 @@
 function Install-Python {
   [CmdletBinding()]
-  param ()
+  param (
+    [switch]$Force
+  )
 
   begin {
     $Host_Os = cliHelper.xcrypt\xcrypt Get_Host_Os
+    $skip_install = !$Force -and [bool](Get-Command python -ErrorAction Ignore)
   }
-
   process {
+    if ($skip_install) { return }
     switch ($Host_Os) {
       'Windows' {
         # Install Chocolatey if not already installed
@@ -44,13 +47,12 @@ function Install-Python {
         throw "Unsupported OS: $Host_Os"
       }
     }
-
-    # Verify Python installation
-    try {
-      $pythonVersion = python --version 2>&1
-      Write-Console "[+] Successfully installed $pythonVersion" -f LimeGreen
-    } catch {
-      Write-Console "[✖] " -f Red -NoNewLine ; Write-Console "Failed to verify Python installation: $_" -f LightCoral
+  }
+  end {
+    if (!$skip_install) {
+      $(Write-Console "verifying: gcm python " -f Yellow -NoNewLine; [bool](Get-Command python -ErrorAction Ignore)) ? (Write-Console "Successfully installed python" -f LimeGreen) : $(Write-Console "[✖] " -f Red -NoNewLine ; Write-Console "Failed to install python" -f LightCoral)
+    } else {
+      Write-Console "[+] $(python --version 2>&1) is already installed" -f LimeGreen
     }
   }
 }

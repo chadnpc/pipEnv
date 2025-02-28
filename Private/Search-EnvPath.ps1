@@ -1,14 +1,14 @@
-﻿function Search-ProjectEnvPath {
+﻿function Search-EnvPath {
   # .SYNOPSIS
   #   Search Project's EnvPath
   # .DESCRIPTION
   #   Searches in the work home for a project with the same name as the project's directory.
   # .LINK
-  #   https://github.com/alainQtec/pipEnv/blob/main/Private/Search-ProjectEnvPath.ps1
+  #   https://github.com/alainQtec/pipEnv/blob/main/Private/Search-EnvPath.ps1
   [CmdletBinding()][OutputType([System.IO.DirectoryInfo])]
   param (
     [Parameter(Position = 0, Mandatory = $false, ValueFromPipeline = $true)]
-    [string]$ProjectPath = (Resolve-Path .).Path
+    [Alias('Path')][string]$ProjectPath = (Resolve-Path .).Path
   )
 
   begin {

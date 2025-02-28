@@ -26,7 +26,7 @@
   }
 
   process {
-    $py = [venv]::GetPythonExecutable()
+    $py = [venv]::get_python_executable()
     if ($null -ne $commands) {
       foreach ($c in $commands) {
         if ($c -in $preset_command_actions.Keys) {

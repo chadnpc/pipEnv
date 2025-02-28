@@ -30,7 +30,7 @@ class EnvManager {
   static [Dictionary[string, string]]$Environments = @{}
   static [PsRecord]$data = @{
     SharePipcache = $False
-    ProjectPath   = { return (Resolve-Path .).Path }
+    CurrentPath   = { return (Resolve-Path .).Path }
     Session       = $null
     Manager       = [EnvManagerName]::pipEnv
     Home          = [EnvManager]::Get_work_Home()
@@ -182,10 +182,11 @@ class venv : EnvManager, IDisposable {
   [PackageManager]$PackageManager
   [version]$PythonVersion
   [string]$CreatedAt
+  hidden [string]$ProjectPath
   hidden [bool] $__Isdisposed
   hidden [string]$__name
   venv() {
-    [void][venv]::From([IO.DirectoryInfo]::new([venv]::data.ProjectPath), [ref]$this)
+    [void][venv]::From([IO.DirectoryInfo]::new([venv]::data.CurrentPath), [ref]$this)
   }
   venv([string]$dir) {
     [void][venv]::From([IO.DirectoryInfo]::new($dir), [ref]$this)
@@ -194,14 +195,14 @@ class venv : EnvManager, IDisposable {
     [void][venv]::From($dir, [ref]$this)
   }
   static [venv] Create() {
-    return [venv]::Create([IO.DirectoryInfo]::new([venv]::data.ProjectPath))
+    return [venv]::Create([IO.DirectoryInfo]::new([venv]::data.CurrentPath))
   }
   static [venv] Create([string]$dir) {
     return [venv]::Create([IO.DirectoryInfo]::new($dir))
   }
   static [venv] Create([IO.DirectoryInfo]$dir) {
     # .INPUTS
-    #  DirectoryInfo: It can be ProjectPath or the exact path for the venv.
+    #  DirectoryInfo: It can be the project path or the exact path for the venv.
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
     $new = $null; $e = $dir -as [venv]; if ($e.IsValid) { return $e }
     # Create new virtual environment named $dir.BaseName and save in work_home [venv]::data.Home
@@ -217,7 +218,7 @@ class venv : EnvManager, IDisposable {
       Set-Location $dir.FullName
       Write-Console "[venv] Creating virtual env for '$($dir.FullName | Invoke-PathShortener)' ... " -f PaleTurquoise -NoNewLine
       Invoke-PipEnv "install", "check"
-      $p = Search-ProjectEnvPath
+      $p = Search-EnvPath
       if ([IO.Directory]::Exists("$p")) {
         $new = [venv]::new($p)
       } else {
@@ -246,7 +247,7 @@ class venv : EnvManager, IDisposable {
         # possible reason 1: ($valid_env_paths.count -eq 0) => throw [EnvironmentNotFoundException]::new("No environment directory found for in $dir")
         # possible reason 2: ($valid_env_paths.count -gt 1) => throw [EnvironmentNotFoundException]::new("Multiple environment directories found in $dir")
         $v ? $(Write-Debug "[venv] Try using already created env in: $([venv]::data.Home | Invoke-PathShortener) ... ") : $null
-        $p = Search-ProjectEnvPath $p
+        $p = Search-EnvPath $p
       } else {
         $p = $valid_env_paths[0].FullName
       }
@@ -272,6 +273,7 @@ class venv : EnvManager, IDisposable {
     )
     $o.Value.Name = (Get-Item $p).Name;
     $o.Value.Path = $p; #the exact path for the venv
+    $o.Value.ProjectPath = $dir.FullName
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('BinPath', { return [IO.Path]::Combine($this.Path, "bin") }, { throw [SetValueException]::new("BinPath is read-only") }))
     $o.Value.CreatedAt = [Datetime]::Now.ToString();
     [venv]::data.PsObject.Properties.Add([PsScriptproperty]::new('PythonVersions', { return [venv]::get_python_versions() }, { throw [SetValueException]::new("PythonVersions is read-only") }))
@@ -287,7 +289,7 @@ class venv : EnvManager, IDisposable {
     return $o.Value
   }
   static [Object[]] SetLocalVersion() {
-    return [venv]::SetLocalVersion([Path]::Combine([venv]::data.ProjectPath, ".python-version"))
+    return [venv]::SetLocalVersion([Path]::Combine([venv]::data.CurrentPath, ".python-version"))
   }
   static [Object[]] SetLocalVersion([string]$str = "versionfile_or_version") {
     $res = $null; [ValidateNotNullOrWhiteSpace()][string]$str = $str;
@@ -308,8 +310,8 @@ class venv : EnvManager, IDisposable {
   [string] get_activation_script() {
     return $this.get_activation_script($this.Path)
   }
-  [string] get_activation_script([string]$ProjectPath) {
-    $s = ([venv]::IsValid($ProjectPath) ? ([IO.Path]::Combine($ProjectPath, 'bin', 'activate.ps1')) : '')
+  [string] get_activation_script([string]$Path) {
+    $s = ([venv]::IsValid($Path) ? ([IO.Path]::Combine($Path, 'bin', 'activate.ps1')) : '')
     if (![IO.File]::Exists($s)) { throw [Exception]::new("Failed to get activation script", [FileNotFoundException]::new("file '$s' not found!")) }
     return $s
   }
@@ -511,13 +513,7 @@ foreach ($Type in $typestoExport) {
       "Unable to register type accelerator '$($Type.FullName)'"
       'Accelerator already exists.'
     ) -join ' - '
-
-    [System.Management.Automation.ErrorRecord]::new(
-      [System.InvalidOperationException]::new($Message),
-      'TypeAcceleratorAlreadyExists',
-      [System.Management.Automation.ErrorCategory]::InvalidOperation,
-      $Type.FullName
-    ) | Write-Warning
+    "TypeAcceleratorAlreadyExists $Message" | Write-Debug
   }
 }
 # Add type accelerators for every exportable type.
