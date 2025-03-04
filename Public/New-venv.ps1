@@ -34,7 +34,7 @@
   }
   process {
     if ($PSCmdlet.ShouldProcess($Path, "Create virtual environment for $Name")) {
-      $v = [Venv]::Create($Path)
+      $v = [venv]::Create($Path)
     }
   }
 

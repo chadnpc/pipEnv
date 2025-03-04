@@ -14,10 +14,9 @@ then
 ```PowerShell
 Import-Module pipEnv
 
-$e = New-venv .
-$e.Activate()
-# do stuff:
-$e.Dispose()
+(New-venv .).Activate()
+# do python stuff here...
+dispose-env
 #same as: deactivate but also deletes the venv directory
 
 Invoke-PipEnv -?

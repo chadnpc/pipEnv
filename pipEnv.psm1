@@ -30,6 +30,7 @@ class EnvManager {
   static [Dictionary[string, string]]$Environments = @{}
   static [PsRecord]$data = @{
     SharePipcache = $False
+    ForceCreate   = $false
     CurrentPath   = { return (Resolve-Path .).Path }
     Session       = $null
     Manager       = [EnvManagerName]::pipEnv
@@ -177,7 +178,7 @@ class venv : EnvManager, IDisposable {
   [string]$Path
   static [InstallRequirements]$req = @(
     ("Python", "Programming Language. i.e: https://github.com/python/cpython", { Install-Python } ),
-    ("pipenv", "Python virtualenv management tool", { Install-PipEnv } )
+    ("PipEnv", "Python virtualenv management tool", { Install-PipEnv } )
   )
   [PackageManager]$PackageManager
   [version]$PythonVersion
@@ -189,7 +190,7 @@ class venv : EnvManager, IDisposable {
     [void][venv]::From([IO.DirectoryInfo]::new([venv]::data.CurrentPath), [ref]$this)
   }
   venv([string]$dir) {
-    [void][venv]::From([IO.DirectoryInfo]::new($dir), [ref]$this)
+    [void][venv]::From([IO.DirectoryInfo]::new([xcrypt]::GetUnResolvedPath($dir)), [ref]$this)
   }
   venv([IO.DirectoryInfo]$dir) {
     [void][venv]::From($dir, [ref]$this)
@@ -204,7 +205,7 @@ class venv : EnvManager, IDisposable {
     # .INPUTS
     #  DirectoryInfo: It can be the project path or the exact path for the venv.
     if (!$dir.Exists) { throw [Argumentexception]::new("Please provide a valid path!", [DirectoryNotFoundException]::new("Directory not found: $dir")) }
-    $new = $null; $e = $dir -as [venv]; if ($e.IsValid) { return $e }
+    $new = $null; if (!$dir.IsNotValidVenv) { $e = $dir -as [venv]; $e.IsValid ? $(return $e) : $null }
     # Create new virtual environment named $dir.BaseName and save in work_home [venv]::data.Home
     $_root_path = (Resolve-Path .).Path
     $usrEnvfile = [IO.FileInfo]::new([venv]::FindEnvFile());
@@ -216,7 +217,7 @@ class venv : EnvManager, IDisposable {
     }
     try {
       Set-Location $dir.FullName
-      Write-Console "[venv] Creating virtual env for '$($dir.FullName | Invoke-PathShortener)' ... " -f PaleTurquoise -NoNewLine
+      Write-Console "[venv] " -f BlueViolet -NoNewLine; Write-Console "Creating virtual env for '$($dir.FullName | Invoke-PathShortener)' ... " -f PaleTurquoise -NoNewLine
       Invoke-PipEnv "install", "check"
       $p = Search-EnvPath
       if ([IO.Directory]::Exists("$p")) {
@@ -240,7 +241,7 @@ class venv : EnvManager, IDisposable {
     # .DESCRIPTION
     #  Does not create a new venv, meaning it can create a valid venv object from a directory
     #  Only if that directory is a valid env directory.
-    $p = $dir.FullName; $v = (Get-Variable 'VerbosePreference' -ValueOnly) -eq 'Continue'
+    $p = $dir.FullName; $v = [ProgressUtil]::data.ShowProgress
     if (![venv]::IsValid($p)) {
       $valid_env_paths = $dir.EnumerateDirectories("*", [SearchOption]::TopDirectoryOnly).Where({ [venv]::IsValid($_.FullName) })
       if ($valid_env_paths.count -ne 1) {
@@ -252,6 +253,16 @@ class venv : EnvManager, IDisposable {
         $p = $valid_env_paths[0].FullName
       }
     }
+    if (![venv]::IsValid($p)) {
+      $msg = "Path $p is not a valid venv"
+      if ([venv]::data.ForceCreate) {
+        $v ? $(Write-Console "[venv] " -f BlueViolet -NoNewLine; Write-Console "$msg, so lets create a new one." -f PaleTurquoise) : $null
+        $dir.PsObject.Properties.Add([psnoteproperty]::new("IsNotValidVenv", $true))
+        return [venv]::Create($dir)
+      } else {
+        throw [System.InvalidOperationException]::new("InvalidOperation: $msg")
+      }
+    }
     [venv]::data.set('Session', $([ref]$o.Value).Value)
     [IO.Directory]::Exists($p) ? (Get-Item $p | Set-ItemProperty -Name Attributes -Value ([IO.FileAttributes]::Hidden)) : $null
     [venv].PsObject.Properties.Add([PsScriptproperty]::new('CONSTANTS', { return [scriptblock]::Create("@{
@@ -261,7 +272,6 @@ class venv : EnvManager, IDisposable {
         }, { throw [SetValueException]::new("CONSTANTS is read-only") }
       )
     )
-    if (![venv]::IsValid($p)) { throw [InvalidOperationException]::new("$p is not a valid venv folder") }
     $o.Value.PsObject.Properties.Add([Psscriptproperty]::new('Name', {
           $v = [venv]::IsValid($this.Path)
           $has_deact_command = $null -ne (Get-Command deactivate -ea Ignore);
@@ -339,7 +349,7 @@ class venv : EnvManager, IDisposable {
     return $versions
   }
   static [bool] IsValid([string]$dir) {
-    $v = $true; $d = [IO.DirectoryInfo]::new($dir); ("bin", "lib").ForEach{
+    $v = $true; $d = [IO.DirectoryInfo]::new([xcrypt]::GetUnResolvedPath($dir)); ("bin", "lib").ForEach{
       $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
       if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
     }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);
