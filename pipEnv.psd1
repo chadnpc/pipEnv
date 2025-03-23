@@ -12,7 +12,7 @@
   RootModule            = 'pipEnv.psm1'
 
   # Version number of this module.
-  ModuleVersion         = '0.1.7'
+  ModuleVersion         = '0.1.8'
 
   # Supported PSEditions
   # CompatiblePSEditions = @()
@@ -52,9 +52,10 @@
 
   # Modules that must be imported into the global environment prior to importing this module
   RequiredModules       = @(
-    'PSScriptAnalyzer'
-    'cliHelper.core'
-    'clihelper.env'
+    'PSScriptAnalyzer',
+    'cliHelper.core',
+    'clihelper.env',
+    'PsModuleBase'
   )
 
   # Assemblies that must be loaded prior to importing this module

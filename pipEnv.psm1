@@ -4,7 +4,7 @@ using namespace System.Collections.Generic
 using namespace System.Management.Automation
 
 #Requires -RunAsAdministrator
-#Requires -Modules clihelper.env, cliHelper.core
+#Requires -Modules PsModuleBase, clihelper.env, cliHelper.core
 #Requires -Psedition Core
 
 #region    Classes
@@ -26,7 +26,7 @@ class EnvironmentNotFoundException : Exception {
   EnvironmentNotFoundException([string]$Message) : base($Message) {}
 }
 
-class EnvManager {
+class EnvManager : PsModuleBase {
   static [Dictionary[string, string]]$Environments = @{}
   static [PsRecord]$data = @{
     SharePipcache = $False
@@ -35,7 +35,7 @@ class EnvManager {
     Session       = $null
     Manager       = [EnvManagerName]::pipEnv
     Home          = [EnvManager]::Get_work_Home()
-    Os            = Get-HostOs
+    Os            = [xcrypt]::GetHostOs()
   }
 
   static [string] Get_work_Home() {
@@ -146,7 +146,7 @@ class EnvManager {
     if (!$envPath) {
       return $null
     }
-    if ((xcrypt Get_Host_Os) -eq "Windows") {
+    if ([xcrypt]::GetHostOs() -eq "Windows") {
       return [IO.Path]::Combine($envPath, "Scripts", "pip.exe")
     } else {
       return [IO.Path]::Combine($envPath, "bin", "pip")
@@ -190,7 +190,7 @@ class venv : EnvManager, IDisposable {
     [void][venv]::From([IO.DirectoryInfo]::new([venv]::data.CurrentPath), [ref]$this)
   }
   venv([string]$dir) {
-    [void][venv]::From([IO.DirectoryInfo]::new([xcrypt]::GetUnResolvedPath($dir)), [ref]$this)
+    [void][venv]::From([IO.DirectoryInfo]::new([venv]::GetUnResolvedPath($dir)), [ref]$this)
   }
   venv([IO.DirectoryInfo]$dir) {
     [void][venv]::From($dir, [ref]$this)
@@ -199,7 +199,7 @@ class venv : EnvManager, IDisposable {
     return [venv]::Create([IO.DirectoryInfo]::new([venv]::data.CurrentPath))
   }
   static [venv] Create([string]$dir) {
-    return [venv]::Create([IO.DirectoryInfo]::new($dir))
+    return [venv]::Create([IO.DirectoryInfo]::new([venv]::GetUnResolvedPath($dir)))
   }
   static [venv] Create([IO.DirectoryInfo]$dir) {
     # .INPUTS
@@ -219,7 +219,7 @@ class venv : EnvManager, IDisposable {
       Set-Location $dir.FullName
       Write-Console "[venv] " -f BlueViolet -NoNewLine; Write-Console "Creating virtual env for '$($dir.FullName | Invoke-PathShortener)' ... " -f PaleTurquoise -NoNewLine
       Invoke-PipEnv "install", "check"
-      $p = Search-EnvPath
+      $p = Search-EnvPath -Path $dir.FullName
       if ([IO.Directory]::Exists("$p")) {
         $new = [venv]::new($p)
       } else {
@@ -349,7 +349,7 @@ class venv : EnvManager, IDisposable {
     return $versions
   }
   static [bool] IsValid([string]$dir) {
-    $v = $true; $d = [IO.DirectoryInfo]::new([xcrypt]::GetUnResolvedPath($dir)); ("bin", "lib").ForEach{
+    $v = $true; $d = [IO.DirectoryInfo]::new([venv]::GetUnResolvedPath($dir)); ("bin", "lib").ForEach{
       $_d = $d.EnumerateDirectories($_); $v = $v -and (($_d.count -eq 1) ? $true : $false)
       if ($_ -eq 'bin') { $v = $v -and (($_d[0].EnumerateFiles("activate*").Count -gt 0) ? $true : $false) }
     }; $v = $v -and (($d.EnumerateFiles("pyvenv.cfg").Count -eq 1) ? $true : $false);

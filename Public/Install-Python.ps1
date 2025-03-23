@@ -5,7 +5,7 @@ function Install-Python {
   )
 
   begin {
-    $Host_Os = cliHelper.xcrypt\xcrypt Get_Host_Os
+    $Host_Os = [xcrypt]::GetHostOs()
     $skip_install = !$Force -and [bool](Get-Command python -ErrorAction Ignore)
   }
   process {

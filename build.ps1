@@ -1,7 +1,7 @@
 ﻿
 #!/usr/bin/env pwsh
 # .SYNOPSIS
-#   pipEnv buildScript v0.1.7
+#   pipEnv buildScript v0.1.8
 # .DESCRIPTION
 #   A custom build script for the module pipEnv
 # .LINK
